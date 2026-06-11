@@ -31,3 +31,52 @@ export interface LanguageOption {
   code: string;
   label: string;
 }
+
+// --- Стадия 2: субтитры и кэш текстов ---
+
+// Источник дорожки субтитров: ручная или авто-сгенерированная (ASR).
+export type CaptionKind = 'manual' | 'asr';
+
+// Дорожка субтитров из ytInitialPlayerResponse.captionTracks.
+export interface CaptionTrack {
+  baseUrl: string; // эндпоинт timedtext (без fmt/tlang)
+  languageCode: string; // язык дорожки, напр. "en"
+  kind: CaptionKind;
+  name: string; // человекочитаемое имя дорожки
+}
+
+// Один сегмент субтитров с таймингом (нужен для синхронной озвучки, Стадия 4).
+export interface CaptionSegment {
+  start: number; // начало, мс
+  duration: number; // длительность, мс
+  text: string;
+}
+
+// Полная запись кэша (одна на видео, хранится под ключом cvm_cap_{videoId}).
+// Оригинал хранится один раз; автопереводы — по одному на целевой язык.
+export interface CvmCacheEntry {
+  videoId: string;
+  title: string;
+  url: string;
+  createdAt: number; // первое создание, epoch мс
+  updatedAt: number; // последнее изменение (добавлен перевод)
+  originalLanguage: string; // язык исходной дорожки
+  originalKind: CaptionKind;
+  original: CaptionSegment[];
+  // Автопереводы YouTube (Google) по коду целевого языка: { ru: [...], es: [...] }.
+  translations: Record<string, CaptionSegment[]>;
+  apiTranslation: CaptionSegment[] | null; // перевод Claude API — заготовка под Стадию 3
+}
+
+// Метаданные записи для списка в Inspector (без тяжёлых сегментов).
+export interface CvmCacheMeta {
+  videoId: string;
+  title: string;
+  url: string;
+  createdAt: number;
+  updatedAt: number;
+  originalLanguage: string;
+  originalKind: CaptionKind;
+  translationLanguages: string[]; // какие целевые языки уже есть
+  hasApi: boolean;
+}

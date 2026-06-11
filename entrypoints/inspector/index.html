@@ -116,6 +116,155 @@
       .changed .row-dot {
         background: var(--accent);
       }
+
+      /* --- Меню кэша текстов (Стадия 2) --- */
+      .cache {
+        max-width: 760px;
+        margin: 28px auto 0;
+      }
+      .cache-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 12px;
+      }
+      .cache-head h2 {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 600;
+      }
+      .cache-actions {
+        display: flex;
+        gap: 8px;
+      }
+      .cache-sort {
+        font-family: inherit;
+        font-size: 13px;
+        color: var(--text);
+        background: transparent;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 6px 12px;
+        cursor: pointer;
+        transition: border-color 0.15s ease, color 0.15s ease;
+      }
+      .cache-sort:hover:not(:disabled) {
+        border-color: var(--accent);
+      }
+      .cache-sort:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+      .cache-clear {
+        font-family: inherit;
+        font-size: 13px;
+        color: var(--text);
+        background: transparent;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 6px 12px;
+        cursor: pointer;
+        transition: border-color 0.15s ease, color 0.15s ease;
+      }
+      .cache-clear:hover:not(:disabled) {
+        border-color: #dc2626;
+        color: #f87171;
+      }
+      .cache-clear:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+      .cache-empty {
+        color: var(--muted);
+        font-size: 14px;
+        padding: 16px;
+        text-align: center;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+      }
+      .cache-item {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        margin-bottom: 8px;
+        overflow: hidden;
+      }
+      .ci-head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 14px;
+        cursor: pointer;
+        user-select: none;
+      }
+      .ci-head:hover {
+        background: rgba(124, 58, 237, 0.08);
+      }
+      .ci-caret {
+        color: var(--muted);
+        font-size: 11px;
+        transition: transform 0.15s ease;
+      }
+      .cache-item.open .ci-caret {
+        transform: rotate(90deg);
+      }
+      .ci-title {
+        flex: 1;
+        font-size: 14px;
+        color: var(--text);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .ci-link {
+        color: var(--accent);
+        text-decoration: none;
+        font-size: 14px;
+      }
+      .ci-link:hover {
+        text-decoration: underline;
+      }
+      .ci-time {
+        color: var(--muted);
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+      .ci-body {
+        display: none; /* видимостью управляет класс .open на .cache-item */
+        border-top: 1px solid var(--border);
+        padding: 12px 14px;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .cache-item.open .ci-body {
+        display: flex;
+      }
+      .banner-label {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin-bottom: 6px;
+      }
+      .banner-text {
+        font-size: 13px;
+        line-height: 1.5;
+        color: var(--text);
+        white-space: pre-wrap;
+        max-height: 180px;
+        overflow-y: auto;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 10px;
+      }
+      .banner-text.placeholder {
+        color: var(--muted);
+        font-style: italic;
+      }
     </style>
   </head>
   <body>
@@ -139,6 +288,17 @@
       </thead>
       <tbody id="rows"></tbody>
     </table>
+
+    <section class="cache">
+      <div class="cache-head">
+        <h2>Кэш текстов</h2>
+        <div class="cache-actions">
+          <button id="cache-sort" class="cache-sort" type="button">↓ Сначала новые</button>
+          <button id="cache-clear" class="cache-clear" type="button">Очистить кэш</button>
+        </div>
+      </div>
+      <div id="cache-list"></div>
+    </section>
 
     <script type="module" src="./main.ts"></script>
   </body>
