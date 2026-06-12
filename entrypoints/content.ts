@@ -1,5 +1,6 @@
 import { defineContentScript, browser } from '#imports';
 import { settings } from '@/lib/storage';
+import { costSamples, computeStats } from '@/lib/calibration';
 import type { CaptionSegment } from '@/lib/types';
 import type {
   BackgroundMessage,
@@ -20,6 +21,9 @@ import {
   WIDGET_LABEL_START,
   WIDGET_LABEL_STOP,
   WIDGET_LABEL_TRANSLATING,
+  WIDGET_COST_PREFIX,
+  WIDGET_COST_NO_DATA,
+  API_MODEL,
   BRIDGE_MESSAGE_SOURCE,
   TIMEDTEXT_FORMAT,
   TIMEDTEXT_FORMAT_PARAM,
@@ -52,6 +56,20 @@ const WIDGET_STYLES = `
   }
   .cvm-toggle[data-active='true']:hover {
     background: rgba(220, 38, 38, 1);
+  }
+  .cvm-cost {
+    margin-top: 6px;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-size: 12px;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.6);
+    border-radius: 6px;
+    padding: 4px 8px;
+    text-align: center;
+    white-space: nowrap;
+  }
+  .cvm-cost[hidden] {
+    display: none;
   }
 `;
 
@@ -210,6 +228,33 @@ export default defineContentScript({
     let currentVideoId: string | null = null; // видео текущего пайплайна (для индикатора)
     let progressText: string | null = null; // подпись прогресса перевода или null
 
+    // --- Показ примерной стоимости в виджете (Стадия 3.4) ---
+    let costEl: HTMLElement | null = null;
+    let showCost = false; // флаг из настроек
+    let dollarsPerChar = 0; // R из калибровки (0 — нет данных)
+    let currentOriginalChars: number | null = null; // символы оригинала текущего видео
+
+    function formatMoney(value: number): string {
+      return value < 0.01 ? `$${value.toFixed(4)}` : `$${value.toFixed(2)}`;
+    }
+
+    // Перерисовать строку стоимости: точные символы оригинала × R.
+    function renderCost(): void {
+      if (costEl === null) {
+        return;
+      }
+      if (!showCost || currentOriginalChars === null) {
+        costEl.hidden = true; // флаг выключен или символы ещё неизвестны
+        return;
+      }
+      costEl.hidden = false;
+      if (dollarsPerChar > 0) {
+        costEl.textContent = WIDGET_COST_PREFIX + formatMoney(currentOriginalChars * dollarsPerChar);
+      } else {
+        costEl.textContent = WIDGET_COST_NO_DATA; // нет калибровки
+      }
+    }
+
     function reportActive(): void {
       const message: BackgroundMessage = { type: 'set-translation-active', active };
       void browser.runtime.sendMessage(message).catch(() => {
@@ -300,6 +345,12 @@ export default defineContentScript({
           console.warn('[CVM] перехваченный оригинал пуст — кэш не записан');
           return;
         }
+        // Точные символы оригинала известны — обновляем строку стоимости в виджете.
+        currentOriginalChars = originalSegments.reduce(
+          (sum, segment) => sum + segment.text.length,
+          0,
+        );
+        renderCost();
         // Оригинал кэшируем один раз (если записи ещё нет).
         if (lookupResponse?.entryExists !== true) {
           const store: CacheStoreMessage = {
@@ -383,7 +434,10 @@ export default defineContentScript({
     });
 
     function resetActive(): void {
-      // Новое видео / SPA-навигация — состояние перевода начинается заново.
+      // Новое видео / SPA-навигация — стоимость прежнего видео больше не актуальна.
+      currentOriginalChars = null;
+      renderCost();
+      // Состояние перевода начинается заново.
       if (!active) {
         return;
       }
@@ -437,6 +491,22 @@ export default defineContentScript({
     settings.targetLanguage.watch(onSettingsChanged);
     settings.useYoutubeTranslation.watch(onSettingsChanged);
 
+    // Стоимость в виджете: подтягиваем флаг и калибровку, живо обновляем при смене.
+    function refreshDollarsPerChar(samples: Parameters<typeof computeStats>[0]): void {
+      dollarsPerChar = computeStats(samples, API_MODEL).dollarsPerChar;
+      renderCost();
+    }
+    void settings.showCost.getValue().then((value) => {
+      showCost = value;
+      renderCost();
+    });
+    void costSamples.getValue().then(refreshDollarsPerChar);
+    settings.showCost.watch((value) => {
+      showCost = value;
+      renderCost();
+    });
+    costSamples.watch(refreshDollarsPerChar);
+
     // Автозапуск: при открытии страницы/смене видео виджет сам переходит
     // в состояние «включено» и запускает пайплайн (если флаг включён).
     async function applyAutoStart(): Promise<void> {
@@ -465,15 +535,22 @@ export default defineContentScript({
       btn.className = 'cvm-toggle';
       btn.addEventListener('click', toggle);
 
-      shadow.append(style, btn);
+      const cost = document.createElement('div');
+      cost.className = 'cvm-cost';
+      cost.hidden = true;
+
+      shadow.append(style, btn, cost);
       button = btn;
+      costEl = cost;
       render();
+      renderCost();
       return host;
     }
 
     function removeWidget(): void {
       document.getElementById(WIDGET_HOST_ID)?.remove();
       button = null;
+      costEl = null;
     }
 
     function isWatchPage(): boolean {

@@ -1,5 +1,5 @@
 import type {
-  CvmRuntimeState,
+  TabRuntimeState,
   CvmCacheEntry,
   CvmCacheMeta,
   CaptionSegment,
@@ -11,9 +11,10 @@ import type {
 // Inspector  <--  background   (long-lived port)
 // =====================================================================
 
+// Рантайм-состояние всех вкладок (per-tab, Стадия 3.4).
 export interface RuntimeStateMessage {
   type: 'runtime-state';
-  state: CvmRuntimeState;
+  tabs: TabRuntimeState[];
 }
 
 // Список метаданных кэша для меню Inspector.

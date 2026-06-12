@@ -9,6 +9,15 @@ import {
   API_BATCH_SIZE,
   API_BATCH_CONCURRENCY,
   API_RETRY_COUNT,
+  API_BATCH_TIMEOUT_MS,
+  API_TIMEOUT_RETRY_COUNT,
+  API_RATE_LIMIT_RETRY_COUNT,
+  API_BACKOFF_BASE_MS,
+  API_BACKOFF_MAX_MS,
+  API_BACKOFF_JITTER_MS,
+  MEDIAN_MIN_SAMPLES,
+  TIMEOUT_LATENCY_FACTOR,
+  TIMEOUT_POLL_MS,
   API_SYSTEM_PROMPT_TEMPLATE,
   LANGUAGE_NAMES,
 } from '@/lib/constants';
@@ -23,6 +32,7 @@ import {
 import { addCostSample } from '@/lib/calibration';
 import type {
   CvmRuntimeState,
+  TabRuntimeState,
   CaptionSegment,
   TranslationProgress,
   TranslationStatus,
@@ -45,19 +55,37 @@ import type {
 type RuntimePort = Parameters<Parameters<typeof browser.runtime.onConnect.addListener>[0]>[0];
 
 export default defineBackground(() => {
-  // Рантайм-состояние (не сохраняется).
-  const runtimeState: CvmRuntimeState = {
-    currentVideoId: null,
-    translationStatus: 'ready',
-    translationActive: false,
-    translationProgress: null,
-  };
+  // Рантайм-состояние per-tab (не сохраняется). Ключ — tabId; у каждой вкладки своё
+  // состояние перевода (Стадия 3.4). Очистка — по browser.tabs.onRemoved.
+  const runtimeStates = new Map<number, CvmRuntimeState>();
+
+  function getTabState(tabId: number): CvmRuntimeState {
+    let state = runtimeStates.get(tabId);
+    if (state === undefined) {
+      state = {
+        currentVideoId: null,
+        translationStatus: 'ready',
+        translationActive: false,
+        translationProgress: null,
+      };
+      runtimeStates.set(tabId, state);
+    }
+    return state;
+  }
+
+  function buildRuntimeMessage(): InspectorMessage {
+    const tabs: TabRuntimeState[] = [...runtimeStates.entries()].map(([tabId, state]) => ({
+      tabId,
+      ...state,
+    }));
+    return { type: 'runtime-state', tabs };
+  }
 
   // Подключённые страницы Inspector — реестр для рассылки обновлений.
   const inspectorPorts = new Set<RuntimePort>();
 
   function broadcastRuntimeState(): void {
-    const message: InspectorMessage = { type: 'runtime-state', state: runtimeState };
+    const message = buildRuntimeMessage();
     for (const port of inspectorPorts) {
       port.postMessage(message);
     }
@@ -82,11 +110,15 @@ export default defineBackground(() => {
     progress: TranslationProgress | null,
     tabId: number | null,
   ): void {
-    runtimeState.currentVideoId = videoId;
-    runtimeState.translationStatus = status;
-    runtimeState.translationProgress = progress;
+    if (tabId === null) {
+      return; // без вкладки состояние не атрибутировать (per-tab)
+    }
+    const state = getTabState(tabId);
+    state.currentVideoId = videoId;
+    state.translationStatus = status;
+    state.translationProgress = progress;
     broadcastRuntimeState();
-    if (tabId !== null && videoId !== null) {
+    if (videoId !== null) {
       const message: TabMessage = {
         type: 'translation-progress',
         videoId,
@@ -114,17 +146,125 @@ export default defineBackground(() => {
     return API_SYSTEM_PROMPT_TEMPLATE.replace('{language}', name);
   }
 
-  // Повтор операции при ошибке (сеть/формат ответа); всего retries повторов.
-  async function withRetry<T>(fn: () => Promise<T>, retries: number): Promise<T> {
-    let lastError: unknown;
-    for (let attempt = 0; attempt <= retries; attempt += 1) {
+  function delay(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      setTimeout(resolve, ms);
+    });
+  }
+
+  // Ошибка API с HTTP-статусом — несёт статус и Retry-After для backoff.
+  class ApiError extends Error {
+    readonly status: number;
+    readonly retryAfterMs: number | null;
+    constructor(status: number, retryAfterMs: number | null, message: string) {
+      super(message);
+      this.name = 'ApiError';
+      this.status = status;
+      this.retryAfterMs = retryAfterMs;
+    }
+  }
+
+  // 429 (rate limit), 529 (overloaded), 503 — временные: ждём и повторяем.
+  function isRateLimit(error: unknown): error is ApiError {
+    return (
+      error instanceof ApiError &&
+      (error.status === 429 || error.status === 529 || error.status === 503)
+    );
+  }
+
+  // Батч превысил таймаут и был оборван (abort) — повторяем без задержки.
+  class TimeoutError extends Error {
+    constructor(message: string) {
+      super(message);
+      this.name = 'TimeoutError';
+    }
+  }
+  function isTimeout(error: unknown): error is TimeoutError {
+    return error instanceof TimeoutError;
+  }
+
+  // Одна попытка батча с адаптивным таймаутом. Таймаут перечитывается на лету
+  // (подстраивается под медиану по мере завершения соседних батчей). Превышение →
+  // abort fetch → TimeoutError наверх для перезапроса.
+  async function runAttempt(
+    texts: string[],
+    language: string,
+    apiKey: string,
+    getTimeoutMs: () => number,
+  ): Promise<BatchResult> {
+    const controller = new AbortController();
+    const startedAt = Date.now();
+    let timedOut = false;
+    const poll = setInterval(() => {
+      if (Date.now() - startedAt >= getTimeoutMs()) {
+        timedOut = true;
+        controller.abort();
+      }
+    }, TIMEOUT_POLL_MS);
+    try {
+      return await translateBatch(texts, language, apiKey, controller.signal);
+    } catch (error: unknown) {
+      if (timedOut) {
+        throw new TimeoutError(
+          `[CVM bg] батч прерван по таймауту ${Math.round(getTimeoutMs())}мс`,
+        );
+      }
+      throw error; // настоящая сетевая/HTTP-ошибка
+    } finally {
+      clearInterval(poll);
+    }
+  }
+
+  // Один батч до успеха: попытка с адаптивным таймаутом + повторы по типу ошибки:
+  //  - таймаут: до API_TIMEOUT_RETRY_COUNT, перезапрос сразу;
+  //  - rate-limit (429/перегрузка): до API_RATE_LIMIT_RETRY_COUNT с backoff + джиттер;
+  //  - прочее (сеть/HTTP): до API_RETRY_COUNT без задержки.
+  async function runBatch(
+    texts: string[],
+    language: string,
+    apiKey: string,
+    getTimeoutMs: () => number,
+  ): Promise<BatchResult> {
+    let timeoutAttempts = 0;
+    let rateLimitAttempts = 0;
+    let networkAttempts = 0;
+    for (;;) {
       try {
-        return await fn();
+        return await runAttempt(texts, language, apiKey, getTimeoutMs);
       } catch (error: unknown) {
-        lastError = error;
+        if (isTimeout(error)) {
+          timeoutAttempts += 1;
+          if (timeoutAttempts > API_TIMEOUT_RETRY_COUNT) {
+            throw error;
+          }
+          console.warn(
+            `[CVM bg] таймаут батча, перезапуск (попытка ${timeoutAttempts}/${API_TIMEOUT_RETRY_COUNT})`,
+          );
+          continue;
+        }
+        if (isRateLimit(error)) {
+          rateLimitAttempts += 1;
+          if (rateLimitAttempts > API_RATE_LIMIT_RETRY_COUNT) {
+            throw error;
+          }
+          const expBackoff = Math.min(
+            API_BACKOFF_BASE_MS * 2 ** (rateLimitAttempts - 1),
+            API_BACKOFF_MAX_MS,
+          );
+          const wait = (error.retryAfterMs ?? expBackoff) + Math.random() * API_BACKOFF_JITTER_MS;
+          console.warn(
+            `[CVM bg] ${error.status} rate-limit, повтор через ${Math.round(wait)}мс ` +
+              `(попытка ${rateLimitAttempts}/${API_RATE_LIMIT_RETRY_COUNT})`,
+          );
+          await delay(wait);
+          continue;
+        }
+        networkAttempts += 1;
+        if (networkAttempts > API_RETRY_COUNT) {
+          throw error;
+        }
       }
     }
-    throw lastError;
   }
 
   interface AnthropicTextBlock {
@@ -177,10 +317,12 @@ export default defineBackground(() => {
   }
 
   // Один запрос к API: реплики -> переводы той же длины (по номерам, с фолбэком).
+  // signal — внешний (hedgeRace владеет хеджем/таймаутом): abort прерывает fetch.
   async function translateBatch(
     texts: string[],
     language: string,
     apiKey: string,
+    signal: AbortSignal,
   ): Promise<BatchResult> {
     const response = await fetch(API_ENDPOINT, {
       method: 'POST',
@@ -196,10 +338,19 @@ export default defineBackground(() => {
         system: buildSystemPrompt(language),
         messages: [{ role: 'user', content: buildNumberedInput(texts) }],
       }),
+      signal,
     });
     if (!response.ok) {
       const detail = await response.text();
-      throw new Error(`[CVM bg] API ${response.status}: ${detail.slice(0, 200)}`);
+      const retryAfterRaw = response.headers.get('retry-after');
+      const retryAfterSec =
+        retryAfterRaw !== null && retryAfterRaw.trim() !== '' ? Number(retryAfterRaw) : Number.NaN;
+      const retryAfterMs = Number.isFinite(retryAfterSec) ? retryAfterSec * 1000 : null;
+      throw new ApiError(
+        response.status,
+        retryAfterMs,
+        `[CVM bg] API ${response.status}: ${detail.slice(0, 200)}`,
+      );
     }
     const data = (await response.json()) as AnthropicResponse;
     const text = (data.content ?? [])
@@ -227,6 +378,7 @@ export default defineBackground(() => {
   }
 
   // Перевод всех батчей пулом на API_BATCH_CONCURRENCY воркеров (порядок сохраняется).
+  // onBatchDone вызывается по завершении каждого батча (для индикатора прогресса).
   async function translateAllBatches(
     batches: string[][],
     language: string,
@@ -240,6 +392,23 @@ export default defineBackground(() => {
     let inputTokens = 0;
     let outputTokens = 0;
 
+    // Латентности завершённых батчей этого прогона — база для адаптивных порогов.
+    const completedMs: number[] = [];
+    function currentMedian(): number | null {
+      if (completedMs.length < MEDIAN_MIN_SAMPLES) {
+        return null; // мало выборок — медиане не доверяем
+      }
+      const sorted = [...completedMs].sort((a, b) => a - b);
+      return sorted[Math.floor(sorted.length / 2)] ?? null;
+    }
+    // Адаптивный таймаут от медианы. Нет медианы → пол. Иначе max(пол, FACTOR × медиана).
+    function timeoutMsFor(): number {
+      const median = currentMedian();
+      return median === null
+        ? API_BATCH_TIMEOUT_MS
+        : Math.max(API_BATCH_TIMEOUT_MS, median * TIMEOUT_LATENCY_FACTOR);
+    }
+
     async function worker(): Promise<void> {
       for (;;) {
         const index = nextIndex;
@@ -249,11 +418,10 @@ export default defineBackground(() => {
           return; // батчи кончились
         }
         const startedAt = Date.now();
-        const result = await withRetry(
-          () => translateBatch(batch, language, apiKey),
-          API_RETRY_COUNT,
-        );
-        batchMs[index] = Date.now() - startedAt;
+        const result = await runBatch(batch, language, apiKey, timeoutMsFor);
+        const ms = Date.now() - startedAt;
+        batchMs[index] = ms;
+        completedMs.push(ms);
         results[index] = result.translations;
         inputTokens += result.inputTokens;
         outputTokens += result.outputTokens;
@@ -316,6 +484,9 @@ export default defineBackground(() => {
         videoSeconds: Math.round(videoMs / 1000),
         costUsd: null,
         createdAt: Date.now(),
+        // Поток отдаётся в Стадии 4 лёгкими сообщениями; в storage пишем целиком и сразу.
+        completedBatches: batches.length,
+        complete: true,
       };
       const stored = await upsertApiTranslation(videoId, language, translated, meta);
       if (!stored) {
@@ -394,8 +565,7 @@ export default defineBackground(() => {
     }
     inspectorPorts.add(port);
 
-    const stateMessage: InspectorMessage = { type: 'runtime-state', state: runtimeState };
-    port.postMessage(stateMessage);
+    port.postMessage(buildRuntimeMessage());
     void broadcastCacheList();
 
     port.onMessage.addListener((raw: unknown) => {
@@ -416,8 +586,11 @@ export default defineBackground(() => {
     const backgroundMessage = message as BackgroundMessage;
 
     if (backgroundMessage.type === 'set-translation-active') {
-      runtimeState.translationActive = backgroundMessage.active;
-      broadcastRuntimeState();
+      const tabId = sender.tab?.id;
+      if (tabId !== undefined) {
+        getTabState(tabId).translationActive = backgroundMessage.active;
+        broadcastRuntimeState();
+      }
       return; // ответ не требуется
     }
 
@@ -427,7 +600,12 @@ export default defineBackground(() => {
         (entry): CacheLookupResponse => ({
           entryExists: entry !== null,
           hasTranslation: entry !== null && entry.translations[language] !== undefined,
-          hasApiTranslation: entry !== null && entry.apiTranslations[language] !== undefined,
+          // Незавершённый (потоковый) перевод считаем отсутствующим — иначе повторный
+          // запуск пропустит дозаполнение. Требуем complete === true.
+          hasApiTranslation:
+            entry !== null &&
+            entry.apiTranslations[language] !== undefined &&
+            entry.apiMeta[language]?.complete === true,
         }),
       );
     }
@@ -457,5 +635,12 @@ export default defineBackground(() => {
     return undefined;
   });
 
-  console.info('[CVM] background ready (Стадия 3.1: Claude API, нумерованный протокол)');
+  // Вкладка закрыта — убираем её рантайм-состояние (иначе утечка + мусор в Inspector).
+  browser.tabs.onRemoved.addListener((tabId: number) => {
+    if (runtimeStates.delete(tabId)) {
+      broadcastRuntimeState();
+    }
+  });
+
+  console.info('[CVM] background ready (Стадия 3.4: рантайм-состояние per-tab)');
 });

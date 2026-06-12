@@ -9,6 +9,7 @@ import {
   DEFAULT_AUTO_START,
   DEFAULT_TRANSLATION_VOLUME,
   DEFAULT_VIDEO_DUCKING,
+  DEFAULT_SHOW_COST,
 } from '@/lib/constants';
 
 // Типизированные элементы настроек поверх chrome.storage.local.
@@ -41,5 +42,8 @@ export const settings = {
   }),
   videoDucking: storage.defineItem<number>(STORAGE_KEYS.videoDucking, {
     fallback: DEFAULT_VIDEO_DUCKING,
+  }),
+  showCost: storage.defineItem<boolean>(STORAGE_KEYS.showCost, {
+    fallback: DEFAULT_SHOW_COST,
   }),
 } as const;

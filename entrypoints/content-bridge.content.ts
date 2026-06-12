@@ -4,6 +4,7 @@ import {
   BRIDGE_MESSAGE_SOURCE,
   TIMEDTEXT_PATH,
   TIMEDTEXT_TLANG_PARAM,
+  TIMEDTEXT_VIDEO_PARAM,
   EXTRACTION_CAPTURE_TIMEOUT_MS,
   EXTRACTION_POLL_MS,
   CC_BUTTON_SELECTOR,
@@ -31,10 +32,24 @@ interface YtMoviePlayer extends Element {
   setOption?: (module: string, option: string, value: unknown) => void;
 }
 
-// --- Перехваченное состояние ---
+// --- Перехваченное состояние (привязано к конкретному видео) ---
 let capturedUrl: string | null = null; // последний запрос ОРИГИНАЛА (без tlang)
 let capturedBody: string | null = null; // его тело
 let capturedLanguage: string | null = null; // lang из URL
+let capturedVideoId: string | null = null; // id видео из URL (param v) — против кросс-загрязнения
+
+function resetCapture(): void {
+  capturedUrl = null;
+  capturedBody = null;
+  capturedLanguage = null;
+  capturedVideoId = null;
+}
+
+// Есть ли валидный перехват именно для этого видео. videoId === null (плеер не отдал id) —
+// принимаем любой перехват (не регрессируем редкий случай).
+function hasCaptureFor(videoId: string | null): boolean {
+  return capturedUrl !== null && (videoId === null || capturedVideoId === videoId);
+}
 
 function isTimedtextUrl(url: string): boolean {
   return url.includes(TIMEDTEXT_PATH);
@@ -62,6 +77,7 @@ function recordTimedtext(url: string, body: string): void {
   capturedUrl = url;
   capturedBody = body;
   capturedLanguage = parsed.searchParams.get('lang');
+  capturedVideoId = parsed.searchParams.get(TIMEDTEXT_VIDEO_PARAM);
 }
 
 // --- Патч fetch / XMLHttpRequest (один раз на страницу) ---
@@ -188,9 +204,14 @@ function setCaptionsHidden(hidden: boolean): void {
 // Дождаться перехвата: если субтитры выключены — включаем сами, ловим запрос,
 // затем возвращаем как было (выключаем, если включали мы). Экран не мигает.
 async function ensureCapture(): Promise<void> {
-  if (capturedUrl !== null) {
+  const currentVideoId = getVideoDetails().videoId;
+  // Уже есть валидный перехват для ТЕКУЩЕГО видео — переиспользуем.
+  if (hasCaptureFor(currentVideoId)) {
     return;
   }
+  // Другое видео (SPA-навигация) или первый раз — сбрасываем старый перехват и берём заново.
+  resetCapture();
+
   const wasOn = isCaptionsOn();
   let weEnabled = false;
 
@@ -204,8 +225,9 @@ async function ensureCapture(): Promise<void> {
     weEnabled = true;
   }
 
+  // Ждём перехват ИМЕННО текущего видео (поздний ответ от старого не подходит).
   const deadline = Date.now() + EXTRACTION_CAPTURE_TIMEOUT_MS;
-  while (capturedUrl === null && Date.now() < deadline) {
+  while (!hasCaptureFor(currentVideoId) && Date.now() < deadline) {
     await delay(EXTRACTION_POLL_MS);
   }
 
@@ -220,14 +242,17 @@ async function ensureCapture(): Promise<void> {
 async function buildExtractionData(): Promise<BridgeExtractionDataMessage> {
   await ensureCapture();
   const { videoId, title } = getVideoDetails();
+  // Отдаём тело ТОЛЬКО если перехват принадлежит текущему видео — иначе перевели бы
+  // чужие субтитры (кросс-загрязнение кэша).
+  const matched = hasCaptureFor(videoId);
   return {
     type: 'extraction-data',
     videoId,
     title,
-    originalLanguage: capturedLanguage,
-    capturedUrl,
-    capturedBody,
-    error: capturedUrl === null ? 'no-capture' : null,
+    originalLanguage: matched ? capturedLanguage : null,
+    capturedUrl: matched ? capturedUrl : null,
+    capturedBody: matched ? capturedBody : null,
+    error: matched ? null : 'no-capture',
   };
 }
 

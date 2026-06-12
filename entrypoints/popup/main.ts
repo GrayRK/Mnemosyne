@@ -27,6 +27,7 @@ const ttsEnabledEl = requireEl<HTMLInputElement>('tts-enabled');
 const subtitlesEnabledEl = requireEl<HTMLInputElement>('subtitles-enabled');
 const useYoutubeTranslationEl = requireEl<HTMLInputElement>('use-youtube-translation');
 const autoStartEl = requireEl<HTMLInputElement>('auto-start');
+const showCostEl = requireEl<HTMLInputElement>('show-cost');
 const ttsVolumeEl = requireEl<HTMLInputElement>('tts-volume');
 const ttsVolumeValueEl = requireEl<HTMLElement>('tts-volume-value');
 const duckingEl = requireEl<HTMLInputElement>('ducking');
@@ -122,6 +123,7 @@ async function loadValues(): Promise<void> {
     autoStart,
     translationVolume,
     videoDucking,
+    showCost,
   ] = await Promise.all([
     settings.apiKey.getValue(),
     settings.targetLanguage.getValue(),
@@ -131,6 +133,7 @@ async function loadValues(): Promise<void> {
     settings.autoStart.getValue(),
     settings.translationVolume.getValue(),
     settings.videoDucking.getValue(),
+    settings.showCost.getValue(),
   ]);
 
   apiKeyEl.value = apiKey;
@@ -139,6 +142,7 @@ async function loadValues(): Promise<void> {
   subtitlesEnabledEl.checked = subtitlesEnabled;
   useYoutubeTranslationEl.checked = useYoutubeTranslation;
   autoStartEl.checked = autoStart;
+  showCostEl.checked = showCost;
 
   ttsVolumeEl.max = String(ratioToPercent(MAX_VOLUME));
   duckingEl.max = String(ratioToPercent(MAX_VIDEO_DUCKING));
@@ -180,6 +184,10 @@ function registerHandlers(): void {
 
   autoStartEl.addEventListener('change', () => {
     void settings.autoStart.setValue(autoStartEl.checked);
+  });
+
+  showCostEl.addEventListener('change', () => {
+    void settings.showCost.setValue(showCostEl.checked);
   });
 
   ttsVolumeEl.addEventListener('input', () => {

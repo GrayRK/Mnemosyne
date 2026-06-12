@@ -10,6 +10,7 @@ import {
   CACHE_BANNER_AUTO_LABEL,
   CACHE_BANNER_API_LABEL,
   CACHE_BANNER_API_PLACEHOLDER,
+  CACHE_BANNER_API_FILLING,
   CACHE_BANNER_EMPTY_PLACEHOLDER,
   API_MODEL,
   API_MODEL_DISPLAY,
@@ -29,7 +30,7 @@ import {
 } from '@/lib/constants';
 import { costSamples, computeStats, clearCostSamples } from '@/lib/calibration';
 import type {
-  CvmRuntimeState,
+  TabRuntimeState,
   CvmCacheMeta,
   CvmCacheEntry,
   CaptionSegment,
@@ -66,15 +67,6 @@ function asNumber(value: number): DisplayValue {
 }
 function asMasked(value: string): DisplayValue {
   return { text: value.length > 0 ? '•••••• (задан)' : '(пусто)', typeName: 'String' };
-}
-function asNullableId(value: string | null): DisplayValue {
-  return { text: value === null ? 'null' : `"${value}"`, typeName: 'String' };
-}
-function asProgress(value: CvmRuntimeState['translationProgress']): DisplayValue {
-  return {
-    text: value === null ? 'null' : `${value.done}/${value.total}`,
-    typeName: value === null ? 'null' : 'Progress',
-  };
 }
 
 // --- Доступ к storage-элементу в обобщённом виде ---
@@ -207,6 +199,19 @@ function updateRow(id: string, display: DisplayValue): void {
   }, HIGHLIGHT_DURATION_MS);
 }
 
+// Удалить строку (для динамических per-tab строк закрытых вкладок).
+function removeRow(id: string): void {
+  const row = rows.get(id);
+  if (row === undefined) {
+    return;
+  }
+  if (row.highlightTimer !== undefined) {
+    clearTimeout(row.highlightTimer);
+  }
+  row.container.remove();
+  rows.delete(id);
+}
+
 // --- Привязка storage-строки: начальное значение + живое наблюдение ---
 function bindStorageRow<T>(
   id: string,
@@ -217,12 +222,52 @@ function bindStorageRow<T>(
   source.watch((value) => updateRow(id, format(value)));
 }
 
-// --- Рантайм-состояние из порта ---
-function applyRuntimeState(state: CvmRuntimeState): void {
-  updateRow('currentVideoId', asNullableId(state.currentVideoId));
-  updateRow('translationStatus', asString(state.translationStatus));
-  updateRow('translationActive', asBoolean(state.translationActive));
-  updateRow('translationProgress', asProgress(state.translationProgress));
+// --- Рантайм-состояние из порта (per-tab, Стадия 3.4) ---
+const TAB_ROW_PREFIX = 'tab:'; // префикс id динамических строк вкладок
+const RUNTIME_EMPTY_ROW_ID = 'tabs-empty'; // строка-заглушка, когда активных вкладок нет
+const knownTabRowIds = new Set<string>();
+
+// Компактная сводка состояния вкладки в одну ячейку значения.
+function formatTabState(tab: TabRuntimeState): DisplayValue {
+  const parts = [
+    tab.currentVideoId === null ? '—' : `"${tab.currentVideoId}"`,
+    tab.translationStatus,
+    tab.translationActive ? 'active' : 'idle',
+    tab.translationProgress === null
+      ? '—'
+      : `${tab.translationProgress.done}/${tab.translationProgress.total}`,
+  ];
+  return { text: parts.join(' · '), typeName: 'Tab' };
+}
+
+function applyRuntimeTabs(tabs: TabRuntimeState[]): void {
+  // Заглушка, если ни одной активной вкладки нет.
+  if (tabs.length === 0) {
+    if (!rows.has(RUNTIME_EMPTY_ROW_ID)) {
+      createRow(RUNTIME_EMPTY_ROW_ID, '(нет активных вкладок)', SOURCE_RUNTIME);
+    }
+    updateRow(RUNTIME_EMPTY_ROW_ID, { text: '—', typeName: 'null' });
+  } else {
+    removeRow(RUNTIME_EMPTY_ROW_ID);
+  }
+
+  const seen = new Set<string>();
+  for (const tab of tabs) {
+    const id = `${TAB_ROW_PREFIX}${tab.tabId}`;
+    seen.add(id);
+    if (!knownTabRowIds.has(id)) {
+      createRow(id, `tab ${tab.tabId}`, SOURCE_RUNTIME);
+      knownTabRowIds.add(id);
+    }
+    updateRow(id, formatTabState(tab));
+  }
+  // Удаляем строки закрытых/исчезнувших вкладок.
+  for (const id of [...knownTabRowIds]) {
+    if (!seen.has(id)) {
+      removeRow(id);
+      knownTabRowIds.delete(id);
+    }
+  }
 }
 
 function setConnection(online: boolean): void {
@@ -443,13 +488,18 @@ function fillBody(body: HTMLElement, entry: CvmCacheEntry): void {
   } else {
     for (const language of apiLanguages) {
       const text = segmentsToText(entry.apiTranslations[language] ?? []);
+      const meta = (entry.apiMeta ?? {})[language];
+      // Пока перевод потоково наполняется — показываем прогресс в подписи.
+      const label =
+        meta !== undefined && !meta.complete
+          ? `${CACHE_BANNER_API_LABEL} · ${language} · ${CACHE_BANNER_API_FILLING} ${meta.completedBatches}/${meta.batchCount}`
+          : `${CACHE_BANNER_API_LABEL} · ${language}`;
       const banner = createBanner(
-        `${CACHE_BANNER_API_LABEL} · ${language}`,
+        label,
         text === '' ? CACHE_BANNER_EMPTY_PLACEHOLDER : text,
         text === '',
       );
       // Кнопка монитора — только если по этому языку есть замеры (apiMeta).
-      const meta = (entry.apiMeta ?? {})[language];
       if (meta !== undefined) {
         appendMonitorButton(banner, meta, entry.videoId, language);
       }
@@ -630,6 +680,9 @@ function renderCalcStats(): void {
     CALC_LABELS.density,
     calcStats.charsPerMinute > 0 ? formatInt(calcStats.charsPerMinute) : '—',
   );
+  // Грубое «среднее по видео»: $/мин = плотность речи (D) × ставка ($/символ, R).
+  const costPerMinute = calcStats.charsPerMinute * calcStats.dollarsPerChar;
+  addCsRow(CALC_LABELS.costPerMinute, costPerMinute > 0 ? formatMoney(costPerMinute) : '—');
   addCsRow(CALC_LABELS.samples, formatInt(calcStats.sampleCount));
   addCsRow(CALC_LABELS.model, API_MODEL_DISPLAY);
 }
@@ -725,7 +778,7 @@ function connect(): void {
   port.onMessage.addListener((message: unknown) => {
     const inspectorMessage = message as InspectorMessage;
     if (inspectorMessage.type === 'runtime-state') {
-      applyRuntimeState(inspectorMessage.state);
+      applyRuntimeTabs(inspectorMessage.tabs);
     } else if (inspectorMessage.type === 'cache-list') {
       applyCacheList(inspectorMessage.items);
     } else if (inspectorMessage.type === 'cache-entry') {
@@ -751,11 +804,7 @@ function init(): void {
   createRow('selectedVoice', 'selectedVoice', SOURCE_STORAGE);
   createRow('targetLanguage', 'targetLanguage', SOURCE_STORAGE);
   createRow('apiKey', 'apiKey', SOURCE_STORAGE);
-  // Runtime-строки.
-  createRow('translationActive', 'translationActive', SOURCE_RUNTIME);
-  createRow('currentVideoId', 'currentVideoId', SOURCE_RUNTIME);
-  createRow('translationStatus', 'translationStatus', SOURCE_RUNTIME);
-  createRow('translationProgress', 'translationProgress', SOURCE_RUNTIME);
+  // Runtime-строки создаются динамически per-tab (applyRuntimeTabs) по приходу состояния.
 
   bindStorageRow('videoDucking', settings.videoDucking, asNumber);
   bindStorageRow('translationVolume', settings.translationVolume, asNumber);

@@ -11,6 +11,7 @@ export interface CvmSettings {
   autoStart: boolean; // запускать перевод при открытии страницы
   translationVolume: number; // 0..1
   videoDucking: number; // 0..MAX_VIDEO_DUCKING
+  showCost: boolean; // показывать примерную стоимость перевода в виджете
 }
 
 // Статус перевода для индикатора и Inspector.
@@ -28,6 +29,12 @@ export interface CvmRuntimeState {
   translationStatus: TranslationStatus;
   translationActive: boolean; // состояние кнопки виджета (вкл/выкл перевод)
   translationProgress: TranslationProgress | null; // null — перевод не идёт
+}
+
+// Рантайм-состояние конкретной вкладки (per-tab, Стадия 3.4). Фон хранит
+// Map<tabId, CvmRuntimeState>; в Inspector уходит массив таких записей.
+export interface TabRuntimeState extends CvmRuntimeState {
+  tabId: number;
 }
 
 // Полный снимок состояния для Live State Inspector.
@@ -72,6 +79,8 @@ export interface ApiTranslationMeta {
   videoSeconds: number; // длительность субтитровой дорожки, сек (для плотности речи)
   costUsd: number | null; // зафиксированная стоимость перевода, $ (Стадия 3.3); null — не задана
   createdAt: number; // когда выполнен замер, epoch мс
+  completedBatches: number; // сколько батчей уже записано (потоковая отдача, Стадия 3.4)
+  complete: boolean; // true — перевод дописан целиком; false — ещё наполняется
 }
 
 // --- Калибровка калькулятора стоимости (Стадия 3.3) ---
