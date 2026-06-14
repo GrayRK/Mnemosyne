@@ -9,7 +9,9 @@ export const YOUTUBE_MATCHES: string[] = ['https://www.youtube.com/*'];
 export const STORAGE_KEYS = {
   apiKey: 'local:cvm_api_key',
   targetLanguage: 'local:cvm_target_language',
+  ttsEngine: 'local:cvm_tts_engine',
   selectedVoice: 'local:cvm_selected_voice',
+  selectedVoiceEdge: 'local:cvm_selected_voice_edge',
   ttsEnabled: 'local:cvm_tts_enabled',
   subtitlesEnabled: 'local:cvm_subtitles_enabled',
   useYoutubeTranslation: 'local:cvm_use_youtube_translation',
@@ -17,11 +19,18 @@ export const STORAGE_KEYS = {
   translationVolume: 'local:cvm_translation_volume',
   videoDucking: 'local:cvm_video_ducking',
   showCost: 'local:cvm_show_cost',
+  ttsMinRate: 'local:cvm_tts_min_rate',
+  ttsMaxRate: 'local:cvm_tts_max_rate',
+  ttsEndpoint: 'local:cvm_tts_endpoint',
+  ttsOffsetMs: 'local:cvm_tts_offset_ms',
+  subsPositionPct: 'local:cvm_subs_position_pct',
 } as const;
 
 // --- Значения по умолчанию ---
 export const DEFAULT_TARGET_LANGUAGE = 'ru';
-export const DEFAULT_SELECTED_VOICE = '';
+export const DEFAULT_TTS_ENGINE = 'edge'; // нейронный Edge по умолчанию
+export const DEFAULT_SELECTED_VOICE = ''; // Web Speech: '' — авто-подбор по языку
+export const DEFAULT_SELECTED_VOICE_EDGE = ''; // Edge: '' — первый голос языка из каталога
 export const DEFAULT_TTS_ENABLED = true;
 export const DEFAULT_SUBTITLES_ENABLED = true;
 export const DEFAULT_USE_YOUTUBE_TRANSLATION = false;
@@ -29,6 +38,10 @@ export const DEFAULT_AUTO_START = false;
 export const DEFAULT_TRANSLATION_VOLUME = 0.9; // громкость TTS, 0..1
 export const DEFAULT_VIDEO_DUCKING = 0.4; // приглушение оригинала, 0..MAX_VIDEO_DUCKING
 export const DEFAULT_SHOW_COST = false; // показывать примерную стоимость перевода в виджете
+export const DEFAULT_TTS_MIN_RATE = 1.0; // нижняя граница темпа TTS по умолчанию (настраивается в Inspector)
+export const DEFAULT_TTS_MAX_RATE = 4.0; // верхняя граница темпа TTS по умолчанию (настраивается в Inspector)
+export const DEFAULT_TTS_OFFSET_MS = 0; // сдвиг времени озвучки/субтитров относительно видео, мс
+export const DEFAULT_SUBS_POSITION_PCT = 88; // вертикальное положение субтитров (низ ~88%)
 
 // --- Границы значений ---
 export const MIN_VOLUME = 0;
@@ -76,6 +89,11 @@ export const WIDGET_LABEL_TRANSLATING = 'Перевод'; // + " N/M" — инд
 // оригинала × R (калибровка). Погрешность — доп. батчи/повторы.
 export const WIDGET_COST_PREFIX = 'Стоимость ≈ '; // + $X
 export const WIDGET_COST_NO_DATA = 'Стоимость: нет калибровки'; // R неизвестен (нет замеров)
+
+// --- Караоке-субтитры озвучки (Стадия 4) ---
+// Оверлей внизу плеера: предыдущая (тускло) / текущая (ярко, с множителем темпа) / следующая (тускло).
+export const SUBS_HOST_ID = 'cvm-subs-host';
+export const SUBS_RATE_PREFIX = '×'; // префикс множителя темпа TTS перед текущей строкой
 
 // --- Извлечение субтитров YouTube (Стадия 2) ---
 // Прямой запрос к timedtext: оригинал + автоперевод (Google) через &tlang.
@@ -200,6 +218,113 @@ export const API_RATE_LIMIT_RETRY_COUNT = 4; // повторов именно н
 export const API_BACKOFF_BASE_MS = 500; // база экспоненты: 500, 1000, 2000, 4000…
 export const API_BACKOFF_MAX_MS = 8000; // потолок одной задержки
 export const API_BACKOFF_JITTER_MS = 300; // случайный разброс поверх задержки
+
+// --- TTS / озвучка (Стадия 4) ---
+// Старт-движок — Web Speech API (системные голоса Windows, Microsoft Neural).
+// Параметры передаются в движок как есть; адаптацию темпа считает планировщик.
+export const TTS_DEFAULT_RATE = 1.0; // нормальный темп речи (1.0 = как у голоса по умолчанию)
+// Диапазон скорости речи задаётся пользователем (cvm_tts_min_rate / cvm_tts_max_rate). Темп
+// реплики считается по бюджету и зажимается в [min..max] (оба ×playbackRate). Реплики НЕ
+// пропускаем — лучше «протараторить» и догнать. min позволяет «не читать медленнее ×N».
+// Границы обоих ползунков в Inspector:
+export const TTS_RATE_MIN = 1.0;
+export const TTS_RATE_MAX = 10.0; // абсолютный предел Web Speech
+export const TTS_RATE_STEP = 0.5;
+// Сдвиг озвучки/субтитров относительно видео (мс). + = реплики раньше (упреждение задержки),
+// − = позже. Инструмент для подгонки синхрона на тестах.
+export const TTS_OFFSET_MIN_MS = -3000;
+export const TTS_OFFSET_MAX_MS = 3000;
+export const TTS_OFFSET_STEP_MS = 100;
+// Жёсткие границы rate самого движка (предел спецификации Web Speech 0.1..10). Планировщик
+// масштабирует свой потолок скоростью видео, поэтому абсолютный потолок движка = предел спеки.
+export const TTS_HARD_MIN_RATE = 0.1;
+export const TTS_HARD_MAX_RATE = 10;
+// Живая коррекция темпа в момент воспроизведения (поверх запечённого в синтез rate): для Edge —
+// audio.playbackRate, для Web Speech — множитель к utterance.rate. Считается от реального
+// отставания при старте реплики, поэтому именно она реально догоняет видео. Границы — чтобы
+// замедление не делало речь неразборчиво медленной, а ускорение не выходило за предел движка.
+export const TTS_PLAYBACK_ADJUST_MIN = 0.5;
+// Подстрока в имени голоса, по которой узнаём Microsoft Neural (для выбора и fallback-уведомления).
+export const TTS_NEURAL_HINT = 'neural';
+
+// --- Edge нейронный TTS через прокси-эндпоинт (Стадия 4, путь B) ---
+// Прямой эндпоинт Microsoft из браузера недоступен (нельзя задать Origin/User-Agent) и
+// заблокирован в РФ. Синтез делает внешний прокси вне РФ: Cloudflare Worker (worker/) —
+// рекомендуется, ноль настройки для пользователя; либо локальный хелпер (tools/edge-tts-relay.py)
+// через VPN — для отладки. Адрес эндпоинта настраивается в Inspector (cvm_tts_endpoint).
+// По умолчанию — общий Cloudflare Worker проекта (вне РФ, обходит блокировку + Origin).
+// Конечному пользователю настройка не нужна. Локальный релей (127.0.0.1:5599) — для отладки.
+export const DEFAULT_TTS_ENDPOINT = 'https://cvm-edge-tts.aksenovgeorgiy.workers.dev/tts';
+export const EDGE_TTS_SYNTH_TIMEOUT_MS = 12000; // таймаут одного запроса к эндпоинту
+export const EDGE_TTS_AUDIO_MIME = 'audio/mpeg';
+// Ретраи синтеза у Worker: большинство сбоев транзиентны (холодный старт CF / таймаут).
+// При окончательном провале реплика молча пропускается (без подмены системным голосом).
+export const EDGE_TTS_SYNTH_RETRIES = 2; // дополнительные попытки сверх первой
+export const EDGE_TTS_SYNTH_RETRY_DELAY_MS = 400; // пауза между попытками
+// Префетч-кэш Edge: сколько реплик держать синтезированными наперёд.
+export const TTS_PREFETCH_AHEAD = 6; // синтезируем N реплик вперёд, чтобы убрать сетевые паузы
+export const EDGE_TTS_PREFETCH_CACHE_LIMIT = 10; // ёмкость кэша (≥ TTS_PREFETCH_AHEAD + запас)
+export const TTS_ENDPOINT_LABEL = 'Адрес TTS-эндпоинта';
+export const TTS_ENDPOINT_HINT =
+  'Cloudflare Worker (…workers.dev/tts) или локальный релей. Меняется на лету.';
+// Каталог нейронных голосов Edge по базовому коду языка (id + подпись для popup). Первый в
+// списке — голос по умолчанию для языка. Расширяемо.
+export const EDGE_VOICE_CATALOG: Record<string, { id: string; label: string }[]> = {
+  ru: [
+    { id: 'ru-RU-DmitryNeural', label: 'Дмитрий (М)' },
+    { id: 'ru-RU-SvetlanaNeural', label: 'Светлана (Ж)' },
+    { id: 'ru-RU-DariyaNeural', label: 'Дария (Ж)' },
+  ],
+  en: [
+    { id: 'en-US-AndrewNeural', label: 'Andrew (US, M)' },
+    { id: 'en-US-AriaNeural', label: 'Aria (US, F)' },
+    { id: 'en-US-GuyNeural', label: 'Guy (US, M)' },
+    { id: 'en-GB-RyanNeural', label: 'Ryan (UK, M)' },
+    { id: 'en-GB-SoniaNeural', label: 'Sonia (UK, F)' },
+  ],
+  es: [
+    { id: 'es-ES-AlvaroNeural', label: 'Álvaro (M)' },
+    { id: 'es-ES-ElviraNeural', label: 'Elvira (F)' },
+  ],
+  de: [
+    { id: 'de-DE-ConradNeural', label: 'Conrad (M)' },
+    { id: 'de-DE-KatjaNeural', label: 'Katja (F)' },
+  ],
+  fr: [
+    { id: 'fr-FR-HenriNeural', label: 'Henri (M)' },
+    { id: 'fr-FR-DeniseNeural', label: 'Denise (F)' },
+  ],
+  zh: [
+    { id: 'zh-CN-YunxiNeural', label: 'Yunxi (M)' },
+    { id: 'zh-CN-XiaoxiaoNeural', label: 'Xiaoxiao (F)' },
+  ],
+  ja: [
+    { id: 'ja-JP-KeitaNeural', label: 'Keita (M)' },
+    { id: 'ja-JP-NanamiNeural', label: 'Nanami (F)' },
+  ],
+};
+export const EDGE_TTS_DEFAULT_VOICE = 'ru-RU-DmitryNeural'; // если язык не в каталоге
+
+// Выбор движка озвучки (popup).
+export const TTS_ENGINE_OPTIONS: { id: string; label: string }[] = [
+  { id: 'edge', label: 'Edge (нейронный)' },
+  { id: 'webspeech', label: 'Системный (Web Speech)' },
+];
+
+// Положение субтитров на экране (вертикаль, % высоты плеера).
+export const SUBS_POSITION_MIN = 0;
+export const SUBS_POSITION_MAX = 100;
+export const SUBS_POSITION_STEP = 1;
+
+// --- Планировщик озвучки (Стадия 4) ---
+// Базовая плотность речи голоса на rate 1.0 (символов/сек). Нужна для адаптации темпа:
+// rate = нужный_cps / baseline. Старт ~15 для русского; уточняется на реальном видео.
+export const TTS_BASELINE_CPS = 15;
+// Минимальный бюджет на реплику (мс): пол для расчёта темпа, чтобы не делить на ~0 при
+// сильном отставании/коротком окне (иначе rate улетает в потолок и речь «тараторит»).
+export const TTS_MIN_BUDGET_MS = 300;
+export const VIDEO_SELECTOR = 'video.html5-main-video'; // основной <video> плеера YouTube
+export const DUCK_RESTORE_MS = 300; // плавное восстановление громкости оригинала после реплики
 
 // Английские имена языков для системного промпта (надёжнее кодов).
 export const LANGUAGE_NAMES: Record<string, string> = {

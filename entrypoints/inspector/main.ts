@@ -27,6 +27,19 @@ import {
   CALC_DEFAULT_MINUTES,
   CALC_RESET_CONFIRM,
   CALC_LABELS,
+  TTS_RATE_MIN,
+  TTS_RATE_MAX,
+  TTS_RATE_STEP,
+  TTS_OFFSET_MIN_MS,
+  TTS_OFFSET_MAX_MS,
+  TTS_OFFSET_STEP_MS,
+  SUBS_POSITION_MIN,
+  SUBS_POSITION_MAX,
+  SUBS_POSITION_STEP,
+  SUBS_RATE_PREFIX,
+  TTS_ENDPOINT_LABEL,
+  TTS_ENDPOINT_HINT,
+  API_KEY_SAVE_DEBOUNCE_MS,
 } from '@/lib/constants';
 import { costSamples, computeStats, clearCostSamples } from '@/lib/calibration';
 import type {
@@ -135,6 +148,19 @@ const calcCharsEl = requireEl<HTMLInputElement>('calc-chars');
 const calcCostEl = requireEl<HTMLInputElement>('calc-cost');
 const calcLiveEl = requireEl<HTMLDivElement>('calc-live');
 const calcStatsEl = requireEl<HTMLDivElement>('calc-stats');
+
+// Панель озвучки (TTS): ползунки диапазона скорости «От/До».
+const ttsMinRateEl = requireEl<HTMLInputElement>('tts-minrate');
+const ttsMinRateOutEl = requireEl<HTMLSpanElement>('tts-minrate-out');
+const ttsMaxRateEl = requireEl<HTMLInputElement>('tts-maxrate');
+const ttsMaxRateOutEl = requireEl<HTMLSpanElement>('tts-maxrate-out');
+const ttsOffsetEl = requireEl<HTMLInputElement>('tts-offset');
+const ttsOffsetOutEl = requireEl<HTMLSpanElement>('tts-offset-out');
+const subsPosEl = requireEl<HTMLInputElement>('subs-pos');
+const subsPosOutEl = requireEl<HTMLSpanElement>('subs-pos-out');
+const ttsEndpointEl = requireEl<HTMLInputElement>('tts-endpoint');
+const ttsEndpointLabelEl = requireEl<HTMLLabelElement>('tts-endpoint-label');
+const ttsEndpointHintEl = requireEl<HTMLDivElement>('tts-endpoint-hint');
 
 function createRow(id: string, label: string, source: string): void {
   const tr = document.createElement('tr');
@@ -770,6 +796,113 @@ function initCalc(): void {
   void loadCalibration();
 }
 
+// =====================================================================
+// Панель озвучки (TTS, Стадия 4): потолок скорости
+// =====================================================================
+
+function formatRate(rate: number): string {
+  return `${SUBS_RATE_PREFIX}${rate.toFixed(1)}`;
+}
+
+function initTtsPanel(): void {
+  for (const slider of [ttsMinRateEl, ttsMaxRateEl]) {
+    slider.min = String(TTS_RATE_MIN);
+    slider.max = String(TTS_RATE_MAX);
+    slider.step = String(TTS_RATE_STEP);
+  }
+
+  function paintMin(value: number): void {
+    ttsMinRateEl.value = String(value);
+    ttsMinRateOutEl.textContent = formatRate(value);
+  }
+  function paintMax(value: number): void {
+    ttsMaxRateEl.value = String(value);
+    ttsMaxRateOutEl.textContent = formatRate(value);
+  }
+
+  void settings.ttsMinRate.getValue().then(paintMin);
+  void settings.ttsMaxRate.getValue().then(paintMax);
+
+  // «От» не может превышать «До»: тянем «До» вверх за собой при необходимости.
+  ttsMinRateEl.addEventListener('input', () => {
+    const value = Number(ttsMinRateEl.value);
+    paintMin(value);
+    void settings.ttsMinRate.setValue(value);
+    if (value > Number(ttsMaxRateEl.value)) {
+      paintMax(value);
+      void settings.ttsMaxRate.setValue(value);
+    }
+  });
+
+  // «До» не может опускаться ниже «От»: тянем «От» вниз за собой при необходимости.
+  ttsMaxRateEl.addEventListener('input', () => {
+    const value = Number(ttsMaxRateEl.value);
+    paintMax(value);
+    void settings.ttsMaxRate.setValue(value);
+    if (value < Number(ttsMinRateEl.value)) {
+      paintMin(value);
+      void settings.ttsMinRate.setValue(value);
+    }
+  });
+
+  // Внешние изменения (другая вкладка/контекст) — обновляем контролы.
+  settings.ttsMinRate.watch(paintMin);
+  settings.ttsMaxRate.watch(paintMax);
+
+  // Сдвиг озвучки/субтитров относительно видео (мс).
+  ttsOffsetEl.min = String(TTS_OFFSET_MIN_MS);
+  ttsOffsetEl.max = String(TTS_OFFSET_MAX_MS);
+  ttsOffsetEl.step = String(TTS_OFFSET_STEP_MS);
+  function paintOffset(ms: number): void {
+    ttsOffsetEl.value = String(ms);
+    ttsOffsetOutEl.textContent = `${ms > 0 ? '+' : ''}${ms} мс`;
+  }
+  void settings.ttsOffsetMs.getValue().then(paintOffset);
+  ttsOffsetEl.addEventListener('input', () => {
+    const ms = Number(ttsOffsetEl.value);
+    paintOffset(ms);
+    void settings.ttsOffsetMs.setValue(ms);
+  });
+  settings.ttsOffsetMs.watch(paintOffset);
+
+  // Положение субтитров на экране (вертикаль, %).
+  subsPosEl.min = String(SUBS_POSITION_MIN);
+  subsPosEl.max = String(SUBS_POSITION_MAX);
+  subsPosEl.step = String(SUBS_POSITION_STEP);
+  function paintSubsPos(pct: number): void {
+    subsPosEl.value = String(pct);
+    subsPosOutEl.textContent = `${pct}%`;
+  }
+  void settings.subsPositionPct.getValue().then(paintSubsPos);
+  subsPosEl.addEventListener('input', () => {
+    const pct = Number(subsPosEl.value);
+    paintSubsPos(pct);
+    void settings.subsPositionPct.setValue(pct);
+  });
+  settings.subsPositionPct.watch(paintSubsPos);
+
+  // Эндпоинт синтеза (Cloudflare Worker / локальный релей). Сохраняем с debounce.
+  ttsEndpointLabelEl.textContent = TTS_ENDPOINT_LABEL;
+  ttsEndpointHintEl.textContent = TTS_ENDPOINT_HINT;
+  void settings.ttsEndpoint.getValue().then((value) => {
+    ttsEndpointEl.value = value;
+  });
+  let endpointTimer: ReturnType<typeof setTimeout> | undefined;
+  ttsEndpointEl.addEventListener('input', () => {
+    if (endpointTimer !== undefined) {
+      clearTimeout(endpointTimer);
+    }
+    endpointTimer = setTimeout(() => {
+      void settings.ttsEndpoint.setValue(ttsEndpointEl.value.trim());
+    }, API_KEY_SAVE_DEBOUNCE_MS);
+  });
+  settings.ttsEndpoint.watch((value) => {
+    if (document.activeElement !== ttsEndpointEl) {
+      ttsEndpointEl.value = value;
+    }
+  });
+}
+
 function connect(): void {
   const port = browser.runtime.connect({ name: INSPECTOR_PORT_NAME });
   activePort = port;
@@ -797,22 +930,36 @@ function init(): void {
   // Storage-строки (порядок как в TASKS.md).
   createRow('videoDucking', 'videoDucking', SOURCE_STORAGE);
   createRow('translationVolume', 'translationVolume', SOURCE_STORAGE);
+  createRow('ttsMinRate', 'ttsMinRate', SOURCE_STORAGE);
+  createRow('ttsMaxRate', 'ttsMaxRate', SOURCE_STORAGE);
+  createRow('ttsEndpoint', 'ttsEndpoint', SOURCE_STORAGE);
+  createRow('ttsOffsetMs', 'ttsOffsetMs', SOURCE_STORAGE);
+  createRow('subsPositionPct', 'subsPositionPct', SOURCE_STORAGE);
   createRow('subtitlesEnabled', 'subtitlesEnabled', SOURCE_STORAGE);
   createRow('ttsEnabled', 'ttsEnabled', SOURCE_STORAGE);
+  createRow('ttsEngine', 'ttsEngine', SOURCE_STORAGE);
   createRow('useYoutubeTranslation', 'useYoutubeTranslation', SOURCE_STORAGE);
   createRow('autoStart', 'autoStart', SOURCE_STORAGE);
   createRow('selectedVoice', 'selectedVoice', SOURCE_STORAGE);
+  createRow('selectedVoiceEdge', 'selectedVoiceEdge', SOURCE_STORAGE);
   createRow('targetLanguage', 'targetLanguage', SOURCE_STORAGE);
   createRow('apiKey', 'apiKey', SOURCE_STORAGE);
   // Runtime-строки создаются динамически per-tab (applyRuntimeTabs) по приходу состояния.
 
   bindStorageRow('videoDucking', settings.videoDucking, asNumber);
   bindStorageRow('translationVolume', settings.translationVolume, asNumber);
+  bindStorageRow('ttsMinRate', settings.ttsMinRate, asNumber);
+  bindStorageRow('ttsMaxRate', settings.ttsMaxRate, asNumber);
+  bindStorageRow('ttsEndpoint', settings.ttsEndpoint, asString);
+  bindStorageRow('ttsOffsetMs', settings.ttsOffsetMs, asNumber);
+  bindStorageRow('subsPositionPct', settings.subsPositionPct, asNumber);
   bindStorageRow('subtitlesEnabled', settings.subtitlesEnabled, asBoolean);
   bindStorageRow('ttsEnabled', settings.ttsEnabled, asBoolean);
+  bindStorageRow('ttsEngine', settings.ttsEngine, asString);
   bindStorageRow('useYoutubeTranslation', settings.useYoutubeTranslation, asBoolean);
   bindStorageRow('autoStart', settings.autoStart, asBoolean);
   bindStorageRow('selectedVoice', settings.selectedVoice, asString);
+  bindStorageRow('selectedVoiceEdge', settings.selectedVoiceEdge, asString);
   bindStorageRow('targetLanguage', settings.targetLanguage, asString);
   bindStorageRow('apiKey', settings.apiKey, asMasked);
 
@@ -836,6 +983,7 @@ function init(): void {
     void fixCost();
   });
   initCalc();
+  initTtsPanel();
 
   connect();
   console.info('[CVM] inspector ready');

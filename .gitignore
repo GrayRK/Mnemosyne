@@ -8,6 +8,9 @@ dist/
 *.zip
 stats.html
 
+# Cloudflare Wrangler (локальный кэш/состояние)
+.wrangler/
+
 # Логи
 logs/
 *.log

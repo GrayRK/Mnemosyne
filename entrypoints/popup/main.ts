@@ -8,8 +8,10 @@ import {
   PERCENT_SCALE,
   API_KEY_SAVE_DEBOUNCE_MS,
   INSPECTOR_PAGE,
+  TTS_ENGINE_OPTIONS,
+  EDGE_VOICE_CATALOG,
 } from '@/lib/constants';
-import type { TranslationStatus } from '@/lib/types';
+import type { TranslationStatus, TtsEngineName } from '@/lib/types';
 
 // --- Доступ к элементам (строго, без any) ---
 function requireEl<T extends HTMLElement>(id: string): T {
@@ -22,6 +24,7 @@ function requireEl<T extends HTMLElement>(id: string): T {
 
 const apiKeyEl = requireEl<HTMLInputElement>('api-key');
 const languageEl = requireEl<HTMLSelectElement>('language');
+const ttsEngineEl = requireEl<HTMLSelectElement>('tts-engine');
 const voiceEl = requireEl<HTMLSelectElement>('voice');
 const ttsEnabledEl = requireEl<HTMLInputElement>('tts-enabled');
 const subtitlesEnabledEl = requireEl<HTMLInputElement>('subtitles-enabled');
@@ -77,14 +80,57 @@ function populateLanguages(): void {
   }
 }
 
+function populateEngines(): void {
+  for (const engine of TTS_ENGINE_OPTIONS) {
+    const option = document.createElement('option');
+    option.value = engine.id;
+    option.textContent = engine.label;
+    ttsEngineEl.append(option);
+  }
+}
+
+function baseLang(code: string): string {
+  return (code.split('-')[0] ?? code).toLowerCase();
+}
+
+// Голоса зависят от выбранного движка: Edge — из каталога по языку, Web Speech — системные.
 async function populateVoices(): Promise<void> {
-  const targetLanguage = (await settings.targetLanguage.getValue()).toLowerCase();
+  const engine = (await settings.ttsEngine.getValue()) as TtsEngineName;
+  const targetLanguage = baseLang(await settings.targetLanguage.getValue());
+  voiceEl.replaceChildren();
+
+  if (engine === 'edge') {
+    const list = EDGE_VOICE_CATALOG[targetLanguage] ?? [];
+    if (list.length === 0) {
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = 'Нейронных голосов для языка нет';
+      voiceEl.append(option);
+      voiceEl.disabled = true;
+      return;
+    }
+    voiceEl.disabled = false;
+    for (const voice of list) {
+      const option = document.createElement('option');
+      option.value = voice.id;
+      option.textContent = voice.label;
+      voiceEl.append(option);
+    }
+    const saved = await settings.selectedVoiceEdge.getValue();
+    const first = list[0];
+    if (list.some((voice) => voice.id === saved)) {
+      voiceEl.value = saved;
+    } else if (first !== undefined) {
+      voiceEl.value = first.id;
+      await settings.selectedVoiceEdge.setValue(first.id);
+    }
+    return;
+  }
+
+  // Web Speech: системные голоса, отфильтрованные по языку.
   const matching = speechSynthesis
     .getVoices()
     .filter((voice) => voice.lang.toLowerCase().startsWith(targetLanguage));
-
-  voiceEl.replaceChildren();
-
   if (matching.length === 0) {
     const option = document.createElement('option');
     option.value = '';
@@ -93,7 +139,6 @@ async function populateVoices(): Promise<void> {
     voiceEl.disabled = true;
     return;
   }
-
   voiceEl.disabled = false;
   for (const voice of matching) {
     const option = document.createElement('option');
@@ -101,7 +146,6 @@ async function populateVoices(): Promise<void> {
     option.textContent = `${voice.name} (${voice.lang})`;
     voiceEl.append(option);
   }
-
   const savedVoice = await settings.selectedVoice.getValue();
   const firstVoice = matching[0];
   if (matching.some((voice) => voice.name === savedVoice)) {
@@ -117,6 +161,7 @@ async function loadValues(): Promise<void> {
   const [
     apiKey,
     targetLanguage,
+    ttsEngine,
     ttsEnabled,
     subtitlesEnabled,
     useYoutubeTranslation,
@@ -127,6 +172,7 @@ async function loadValues(): Promise<void> {
   ] = await Promise.all([
     settings.apiKey.getValue(),
     settings.targetLanguage.getValue(),
+    settings.ttsEngine.getValue(),
     settings.ttsEnabled.getValue(),
     settings.subtitlesEnabled.getValue(),
     settings.useYoutubeTranslation.getValue(),
@@ -138,6 +184,7 @@ async function loadValues(): Promise<void> {
 
   apiKeyEl.value = apiKey;
   languageEl.value = targetLanguage;
+  ttsEngineEl.value = ttsEngine;
   ttsEnabledEl.checked = ttsEnabled;
   subtitlesEnabledEl.checked = subtitlesEnabled;
   useYoutubeTranslationEl.checked = useYoutubeTranslation;
@@ -166,8 +213,22 @@ function registerHandlers(): void {
     })();
   });
 
+  ttsEngineEl.addEventListener('change', () => {
+    void (async () => {
+      await settings.ttsEngine.setValue(ttsEngineEl.value as TtsEngineName);
+      await populateVoices(); // у разных движков — разные списки голосов
+    })();
+  });
+
   voiceEl.addEventListener('change', () => {
-    void settings.selectedVoice.setValue(voiceEl.value);
+    void (async () => {
+      const engine = (await settings.ttsEngine.getValue()) as TtsEngineName;
+      if (engine === 'edge') {
+        await settings.selectedVoiceEdge.setValue(voiceEl.value);
+      } else {
+        await settings.selectedVoice.setValue(voiceEl.value);
+      }
+    })();
   });
 
   ttsEnabledEl.addEventListener('change', () => {
@@ -212,6 +273,7 @@ function registerHandlers(): void {
 
 async function init(): Promise<void> {
   populateLanguages();
+  populateEngines();
   await loadValues();
   await populateVoices();
   registerHandlers();

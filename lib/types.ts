@@ -4,7 +4,9 @@
 export interface CvmSettings {
   apiKey: string;
   targetLanguage: string;
-  selectedVoice: string;
+  ttsEngine: TtsEngineName; // выбранный движок озвучки
+  selectedVoice: string; // голос для Web Speech (системный)
+  selectedVoiceEdge: string; // голос для Edge (нейронный); '' — авто по языку
   ttsEnabled: boolean;
   subtitlesEnabled: boolean;
   useYoutubeTranslation: boolean; // брать готовый перевод YouTube вместо API
@@ -12,7 +14,15 @@ export interface CvmSettings {
   translationVolume: number; // 0..1
   videoDucking: number; // 0..MAX_VIDEO_DUCKING
   showCost: boolean; // показывать примерную стоимость перевода в виджете
+  ttsMinRate: number; // нижняя граница темпа TTS (множитель), TTS_RATE_MIN..TTS_RATE_MAX
+  ttsMaxRate: number; // верхняя граница темпа TTS (множитель), TTS_RATE_MIN..TTS_RATE_MAX
+  ttsEndpoint: string; // адрес прокси-эндпоинта синтеза (Cloudflare Worker или локальный релей)
+  ttsOffsetMs: number; // сдвиг ВРЕМЕНИ озвучки/субтитров относительно видео, мс (+раньше / −позже)
+  subsPositionPct: number; // вертикальное положение субтитров на экране, 0 (верх) .. 100 (низ)
 }
+
+// Движок озвучки: 'edge' — нейронный через прокси, 'webspeech' — системные голоса браузера.
+export type TtsEngineName = 'edge' | 'webspeech';
 
 // Статус перевода для индикатора и Inspector.
 export type TranslationStatus = 'ready' | 'translating' | 'error';

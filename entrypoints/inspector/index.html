@@ -543,6 +543,47 @@
         color: var(--text);
         font-variant-numeric: tabular-nums;
       }
+
+      /* --- Панель озвучки (TTS, Стадия 4) --- */
+      .tts {
+        max-width: 760px;
+        margin: 28px auto 0;
+      }
+      .tts-head {
+        margin-bottom: 12px;
+      }
+      .tts-head h2 {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 600;
+      }
+      .tts-card {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 16px 18px;
+      }
+      .tts-hint {
+        font-size: 12px;
+        color: var(--muted);
+        margin-top: 4px;
+        line-height: 1.5;
+      }
+      .tts-sub {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin: 18px 0 8px;
+        padding-top: 12px;
+        border-top: 1px solid var(--border);
+      }
+      .tts-sub:first-child {
+        margin-top: 0;
+        padding-top: 0;
+        border-top: none;
+      }
     </style>
   </head>
   <body>
@@ -566,6 +607,61 @@
       </thead>
       <tbody id="rows"></tbody>
     </table>
+
+    <section class="tts">
+      <div class="tts-head">
+        <h2>Озвучка (TTS)</h2>
+      </div>
+      <div class="tts-card">
+        <div class="tts-sub">Темп речи (общее)</div>
+        <div class="calc-row">
+          <label for="tts-minrate">Скорость от</label>
+          <input type="range" id="tts-minrate" min="1" max="10" step="0.5" value="1" />
+          <span class="calc-val" id="tts-minrate-out">×1.0</span>
+        </div>
+        <div class="calc-row">
+          <label for="tts-maxrate">Скорость до</label>
+          <input type="range" id="tts-maxrate" min="1" max="10" step="0.5" value="4" />
+          <span class="calc-val" id="tts-maxrate-out">×4.0</span>
+        </div>
+        <div class="tts-hint">
+          Диапазон ускорения речи. «От» — минимальная скорость (не читать медленнее этого),
+          «До» — потолок догона на плотной речи. Применяется сразу, к следующим репликам.
+        </div>
+
+        <div class="tts-sub">Синхронизация (общее)</div>
+        <div class="calc-row">
+          <label id="tts-offset-label" for="tts-offset">Сдвиг времени</label>
+          <input type="range" id="tts-offset" min="-3000" max="3000" step="100" value="0" />
+          <span class="calc-val" id="tts-offset-out">0 мс</span>
+        </div>
+        <div class="tts-hint">
+          Сдвиг ВРЕМЕНИ озвучки и субтитров относительно видео. «+» — раньше (упредить задержку),
+          «−» — позже.
+        </div>
+        <div class="calc-row" style="margin-top: 12px">
+          <label id="subs-pos-label" for="subs-pos">Положение субтитров</label>
+          <input type="range" id="subs-pos" min="0" max="100" step="1" value="88" />
+          <span class="calc-val" id="subs-pos-out">88%</span>
+        </div>
+        <div class="tts-hint">
+          Вертикальное положение субтитров на экране: 0% — верх, 100% — низ.
+        </div>
+
+        <div class="tts-sub">Edge (нейронный)</div>
+        <div class="calc-row">
+          <label id="tts-endpoint-label" for="tts-endpoint">Эндпоинт</label>
+          <input
+            type="text"
+            id="tts-endpoint"
+            class="calc-num"
+            spellcheck="false"
+            placeholder="https://…workers.dev/tts"
+          />
+        </div>
+        <div class="tts-hint" id="tts-endpoint-hint"></div>
+      </div>
+    </section>
 
     <section class="cache">
       <div class="cache-head">

@@ -122,12 +122,46 @@ export interface RecordApiCostResponse {
   error: string | null; // напр. 'no-meta', 'already-fixed'
 }
 
+// Источник озвучиваемого перевода: Claude API или автоперевод YouTube.
+export type TranslationSource = 'api' | 'youtube';
+
+// Запрос финальных переведённых сегментов из кэша для озвучки (Стадия 4).
+// content сам не держит результат API-перевода (его формирует и кэширует фон),
+// поэтому забирает готовые сегменты этим сообщением.
+export interface GetTranslationMessage {
+  type: 'get-translation';
+  videoId: string;
+  language: string;
+  source: TranslationSource;
+}
+
+export interface GetTranslationResponse {
+  segments: CaptionSegment[] | null; // null — перевода на язык в кэше нет
+}
+
+// Синтез одной реплики через Edge нейронный TTS (Стадия 4). Фон открывает websocket к
+// Microsoft, возвращает MP3 в base64 (ArrayBuffer через runtime.sendMessage не переносится).
+export interface TtsSynthMessage {
+  type: 'tts-synth';
+  text: string;
+  voice: string; // нейронный голос, напр. 'ru-RU-DmitryNeural'
+  rate: number; // множитель темпа (запекается в SSML)
+}
+
+export interface TtsSynthResponse {
+  ok: boolean;
+  audio: string | null; // MP3 в base64
+  error: string | null;
+}
+
 export type BackgroundMessage =
   | SetTranslationActiveMessage
   | CacheLookupMessage
   | CacheStoreMessage
   | ApiTranslateMessage
-  | RecordApiCostMessage;
+  | RecordApiCostMessage
+  | GetTranslationMessage
+  | TtsSynthMessage;
 
 // =====================================================================
 // background  -->  content (tab)   (browser.tabs.sendMessage)

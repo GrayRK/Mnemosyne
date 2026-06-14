@@ -23,8 +23,15 @@ export default defineConfig({
     name: 'ClaudeVoiceMaster',
     description: 'Перевод и озвучка субтитров YouTube в реальном времени.',
     permissions: ['storage'],
-    // Доступ к API перевода из service worker (fetch к aiprimetech.io).
-    host_permissions: ['https://aiprimetech.io/*'],
+    // Доступ из service worker: API перевода (aiprimetech.io) + прокси Edge TTS (Стадия 4):
+    // Cloudflare Worker (*.workers.dev) и/или локальный релей (127.0.0.1). Порт в match-паттерн
+    // не входит — покрывает любой. Для своего домена Worker'а добавь сюда его хост.
+    host_permissions: [
+      'https://aiprimetech.io/*',
+      'https://*.workers.dev/*',
+      'http://127.0.0.1/*',
+      'http://localhost/*',
+    ],
     icons: {
       16: '/icons/16.png',
       32: '/icons/32.png',

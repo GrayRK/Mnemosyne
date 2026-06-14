@@ -30,6 +30,7 @@ import {
   clearAll,
 } from '@/lib/cache';
 import { addCostSample } from '@/lib/calibration';
+import { synthesize, audioToBase64 } from '@/lib/edge-tts';
 import type {
   CvmRuntimeState,
   TabRuntimeState,
@@ -48,6 +49,10 @@ import type {
   ApiTranslateResponse,
   RecordApiCostMessage,
   RecordApiCostResponse,
+  GetTranslationMessage,
+  GetTranslationResponse,
+  TtsSynthMessage,
+  TtsSynthResponse,
   TabMessage,
 } from '@/lib/messaging';
 
@@ -537,6 +542,33 @@ export default defineBackground(() => {
     return { ok: true, error: null };
   }
 
+  // Синтез одной реплики через Edge нейронный TTS (Стадия 4). Фон делает websocket-запрос
+  // (из SW — мимо CSP страницы), возвращает MP3 в base64 для проигрывания в content.
+  async function handleTtsSynth(message: TtsSynthMessage): Promise<TtsSynthResponse> {
+    try {
+      const endpoint = await settings.ttsEndpoint.getValue();
+      const audio = await synthesize(endpoint, message.text, message.voice, message.rate);
+      return { ok: true, audio: audioToBase64(audio), error: null };
+    } catch (error: unknown) {
+      console.warn('[CVM bg] edge-tts синтез не удался', error);
+      return { ok: false, audio: null, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  // Отдать content финальные переведённые сегменты для озвучки (Стадия 4).
+  async function handleGetTranslation(
+    message: GetTranslationMessage,
+  ): Promise<GetTranslationResponse> {
+    const { videoId, language, source } = message;
+    const entry = await getEntry(videoId);
+    if (entry === null) {
+      return { segments: null };
+    }
+    const segments =
+      source === 'api' ? entry.apiTranslations[language] : entry.translations[language];
+    return { segments: segments ?? null };
+  }
+
   // --- Управляющие команды Inspector по тому же порту ---
   async function handleInspectorControl(
     port: RuntimePort,
@@ -630,6 +662,14 @@ export default defineBackground(() => {
 
     if (backgroundMessage.type === 'record-api-cost') {
       return handleRecordApiCost(backgroundMessage);
+    }
+
+    if (backgroundMessage.type === 'get-translation') {
+      return handleGetTranslation(backgroundMessage);
+    }
+
+    if (backgroundMessage.type === 'tts-synth') {
+      return handleTtsSynth(backgroundMessage);
     }
 
     return undefined;
