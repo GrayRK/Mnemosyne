@@ -35,7 +35,7 @@ async function synthesizeOnce(
     signal: AbortSignal.timeout(EDGE_TTS_SYNTH_TIMEOUT_MS),
   });
   if (!response.ok) {
-    throw new Error(`[CVM] edge-tts релей вернул статус ${response.status}`);
+    throw new Error(`[Mnemosyne] edge-tts релей вернул статус ${response.status}`);
   }
   return await response.arrayBuffer();
 }

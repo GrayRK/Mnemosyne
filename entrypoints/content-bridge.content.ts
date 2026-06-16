@@ -284,6 +284,6 @@ export default defineContentScript({
       }
     });
 
-    console.debug('[CVM] content bridge (MAIN) loaded — перехват timedtext активен');
+    console.debug('[Mnemosyne] content bridge (MAIN) loaded — перехват timedtext активен');
   },
 });

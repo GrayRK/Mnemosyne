@@ -317,7 +317,7 @@ export class EdgeTtsEngine implements TtsEngine {
       }
       // Синтез не удался даже после ретраев — реплику ПРОПУСКАЕМ (без подмены Web Speech).
       // Планировщику сообщаем «конец реплики», чтобы он снял ducking и перешёл к следующей.
-      console.warn('[CVM] edge-tts недоступен — реплика пропущена', error);
+      console.warn('[Mnemosyne] edge-tts недоступен — реплика пропущена', error);
       this.release();
       opts.onEnd?.();
     }

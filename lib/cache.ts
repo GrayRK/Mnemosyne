@@ -9,11 +9,11 @@ import type {
 } from '@/lib/types';
 
 // Слой кэша текстов поверх chrome.storage.local (Стадия 2).
-// Одна запись на видео (ключ cvm_cap_{videoId}); внутри — оригинал один раз и
-// словарь автопереводов по целевым языкам. Лёгкий индекс (cvm_cap_index)
+// Одна запись на видео (ключ mnemosyne_cap_{videoId}); внутри — оригинал один раз и
+// словарь автопереводов по целевым языкам. Лёгкий индекс (mnemosyne_cap_index)
 // даёт список без чтения всех сегментов.
 
-type EntryKey = `local:cvm_cap_${string}`;
+type EntryKey = `local:mnemosyne_cap_${string}`;
 
 function entryKey(videoId: string): EntryKey {
   return `${CACHE_ENTRY_PREFIX}${videoId}` as EntryKey;

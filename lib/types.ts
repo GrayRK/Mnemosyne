@@ -96,7 +96,7 @@ export interface ApiTranslationMeta {
 // --- Калибровка калькулятора стоимости (Стадия 3.3) ---
 
 // Один замер: реальная стоимость перевода против его объёма/длительности.
-// Хранится отдельно от кэша (cvm_cost_samples), переживает очистку кэша.
+// Хранится отдельно от кэша (mnemosyne_cost_samples), переживает очистку кэша.
 export interface CostSample {
   dollars: number; // фактически потрачено на перевод, $
   chars: number; // символов оригинала (база расчёта)
@@ -117,7 +117,7 @@ export interface CalibrationStats {
   tokensPerChar: number; // для оценки токенов в калькуляторе
 }
 
-// Полная запись кэша (одна на видео, хранится под ключом cvm_cap_{videoId}).
+// Полная запись кэша (одна на видео, хранится под ключом mnemosyne_cap_{videoId}).
 // Оригинал хранится один раз; автопереводы — по одному на целевой язык.
 export interface CvmCacheEntry {
   videoId: string;

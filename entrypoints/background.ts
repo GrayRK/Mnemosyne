@@ -211,7 +211,7 @@ export default defineBackground(() => {
     } catch (error: unknown) {
       if (timedOut) {
         throw new TimeoutError(
-          `[CVM bg] батч прерван по таймауту ${Math.round(getTimeoutMs())}мс`,
+          `[Mnemosyne bg] батч прерван по таймауту ${Math.round(getTimeoutMs())}мс`,
         );
       }
       throw error; // настоящая сетевая/HTTP-ошибка
@@ -243,7 +243,7 @@ export default defineBackground(() => {
             throw error;
           }
           console.warn(
-            `[CVM bg] таймаут батча, перезапуск (попытка ${timeoutAttempts}/${API_TIMEOUT_RETRY_COUNT})`,
+            `[Mnemosyne bg] таймаут батча, перезапуск (попытка ${timeoutAttempts}/${API_TIMEOUT_RETRY_COUNT})`,
           );
           continue;
         }
@@ -258,7 +258,7 @@ export default defineBackground(() => {
           );
           const wait = (error.retryAfterMs ?? expBackoff) + Math.random() * API_BACKOFF_JITTER_MS;
           console.warn(
-            `[CVM bg] ${error.status} rate-limit, повтор через ${Math.round(wait)}мс ` +
+            `[Mnemosyne bg] ${error.status} rate-limit, повтор через ${Math.round(wait)}мс ` +
               `(попытка ${rateLimitAttempts}/${API_RATE_LIMIT_RETRY_COUNT})`,
           );
           await delay(wait);
@@ -354,7 +354,7 @@ export default defineBackground(() => {
       throw new ApiError(
         response.status,
         retryAfterMs,
-        `[CVM bg] API ${response.status}: ${detail.slice(0, 200)}`,
+        `[Mnemosyne bg] API ${response.status}: ${detail.slice(0, 200)}`,
       );
     }
     const data = (await response.json()) as AnthropicResponse;
@@ -365,7 +365,7 @@ export default defineBackground(() => {
     const translations = parseNumbered(text, texts);
     const missing = translations.filter((value, index) => value === texts[index]).length;
     if (missing > 0) {
-      console.warn(`[CVM bg] батч: ${missing}/${texts.length} строк остались оригиналом`);
+      console.warn(`[Mnemosyne bg] батч: ${missing}/${texts.length} строк остались оригиналом`);
     }
     return {
       translations,
@@ -495,13 +495,13 @@ export default defineBackground(() => {
       };
       const stored = await upsertApiTranslation(videoId, language, translated, meta);
       if (!stored) {
-        throw new Error('[CVM bg] запись оригинала не найдена — перевод не сохранён');
+        throw new Error('[Mnemosyne bg] запись оригинала не найдена — перевод не сохранён');
       }
       await broadcastCacheList();
       setTranslationRuntime(videoId, 'ready', null, tabId);
       return { ok: true, error: null };
     } catch (error: unknown) {
-      console.error('[CVM bg] перевод через API не удался', error);
+      console.error('[Mnemosyne bg] перевод через API не удался', error);
       setTranslationRuntime(videoId, 'error', null, tabId);
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }
@@ -550,7 +550,7 @@ export default defineBackground(() => {
       const audio = await synthesize(endpoint, message.text, message.voice, message.rate);
       return { ok: true, audio: audioToBase64(audio), error: null };
     } catch (error: unknown) {
-      console.warn('[CVM bg] edge-tts синтез не удался', error);
+      console.warn('[Mnemosyne bg] edge-tts синтез не удался', error);
       return { ok: false, audio: null, error: error instanceof Error ? error.message : String(error) };
     }
   }
@@ -651,7 +651,7 @@ export default defineBackground(() => {
           return { ok: true };
         })
         .catch((error: unknown) => {
-          console.error('[CVM bg] cache-store не удался', error);
+          console.error('[Mnemosyne bg] cache-store не удался', error);
           throw error;
         });
     }
@@ -682,5 +682,5 @@ export default defineBackground(() => {
     }
   });
 
-  console.info('[CVM] background ready (Стадия 3.4: рантайм-состояние per-tab)');
+  console.info('[Mnemosyne] background ready (Стадия 3.4: рантайм-состояние per-tab)');
 });

@@ -55,7 +55,7 @@ import {
 const YT_NAVIGATE_EVENT = 'yt-navigate-finish';
 
 const WIDGET_STYLES = `
-  .cvm-toggle {
+  .mnemosyne-toggle {
     font-family: 'Segoe UI', system-ui, sans-serif;
     font-size: 13px;
     font-weight: 600;
@@ -67,16 +67,16 @@ const WIDGET_STYLES = `
     cursor: pointer;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
   }
-  .cvm-toggle:hover {
+  .mnemosyne-toggle:hover {
     background: rgba(124, 58, 237, 1);
   }
-  .cvm-toggle[data-active='true'] {
+  .mnemosyne-toggle[data-active='true'] {
     background: rgba(220, 38, 38, 0.92);
   }
-  .cvm-toggle[data-active='true']:hover {
+  .mnemosyne-toggle[data-active='true']:hover {
     background: rgba(220, 38, 38, 1);
   }
-  .cvm-cost {
+  .mnemosyne-cost {
     margin-top: 6px;
     font-family: 'Segoe UI', system-ui, sans-serif;
     font-size: 12px;
@@ -87,7 +87,7 @@ const WIDGET_STYLES = `
     text-align: center;
     white-space: nowrap;
   }
-  .cvm-cost[hidden] {
+  .mnemosyne-cost[hidden] {
     display: none;
   }
 `;
@@ -95,7 +95,7 @@ const WIDGET_STYLES = `
 // Караоке-субтитры: три строки внизу плеера. Текущая — ярко, соседние — тускло.
 // Слева от текущей строки — множитель темпа TTS.
 const SUBS_STYLES = `
-  .cvm-subs {
+  .mnemosyne-subs {
     position: absolute;
     left: 50%;
     top: 50%;
@@ -110,14 +110,14 @@ const SUBS_STYLES = `
     font-family: 'Segoe UI', system-ui, sans-serif;
     text-align: center;
   }
-  .cvm-subs[hidden] {
+  .mnemosyne-subs[hidden] {
     display: none;
   }
-  .cvm-sub:empty {
+  .mnemosyne-sub:empty {
     display: none;
   }
-  .cvm-sub-prev,
-  .cvm-sub-next {
+  .mnemosyne-sub-prev,
+  .mnemosyne-sub-next {
     font-size: 18px;
     color: rgba(255, 255, 255, 0.5);
     background: rgba(0, 0, 0, 0.4);
@@ -125,13 +125,13 @@ const SUBS_STYLES = `
     padding: 1px 8px;
     text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
   }
-  .cvm-sub-cur {
+  .mnemosyne-sub-cur {
     display: inline-flex;
     align-items: center;
     gap: 10px;
     max-width: 100%;
   }
-  .cvm-sub-cur-text {
+  .mnemosyne-sub-cur-text {
     font-size: 26px;
     font-weight: 700;
     color: #fff;
@@ -140,7 +140,7 @@ const SUBS_STYLES = `
     padding: 2px 12px;
     text-shadow: 0 2px 6px rgba(0, 0, 0, 0.95);
   }
-  .cvm-sub-rate {
+  .mnemosyne-sub-rate {
     font-size: 16px;
     font-weight: 700;
     color: #fff;
@@ -178,7 +178,7 @@ function requestExtraction(): Promise<BridgeExtractionDataMessage> {
   return new Promise((resolve, reject) => {
     const timer = window.setTimeout(() => {
       window.removeEventListener('message', onMessage);
-      reject(new Error('[CVM] мост не ответил на запрос извлечения'));
+      reject(new Error('[Mnemosyne] мост не ответил на запрос извлечения'));
     }, EXTRACTION_REQUEST_TIMEOUT_MS);
 
     function onMessage(event: MessageEvent): void {
@@ -289,10 +289,10 @@ async function fetchTranslation(capturedUrl: string, tlang: string): Promise<Cap
   const response = await fetch(url.toString(), { credentials: 'include' });
   const body = await response.text();
   console.info(
-    `[CVM] автоперевод ${response.status} (${body.length} б, tlang=${tlang})`,
+    `[Mnemosyne] автоперевод ${response.status} (${body.length} б, tlang=${tlang})`,
   );
   if (!response.ok) {
-    throw new Error(`[CVM] автоперевод вернул статус ${response.status}`);
+    throw new Error(`[Mnemosyne] автоперевод вернул статус ${response.status}`);
   }
   return parseSegments(body);
 }
@@ -346,8 +346,8 @@ export default defineContentScript({
     let ttsVoiceName = ''; // голос Web Speech ('' — авто-подбор по языку)
     let edgeVoiceName = DEFAULT_SELECTED_VOICE_EDGE; // голос Edge ('' — дефолт языка из каталога)
     let ttsVolume = 1; // громкость TTS 0..1
-    let ttsMinRate = DEFAULT_TTS_MIN_RATE; // нижняя граница темпа (живо из cvm_tts_min_rate)
-    let ttsMaxRate = DEFAULT_TTS_MAX_RATE; // верхняя граница темпа (живо из cvm_tts_max_rate)
+    let ttsMinRate = DEFAULT_TTS_MIN_RATE; // нижняя граница темпа (живо из mnemosyne_tts_min_rate)
+    let ttsMaxRate = DEFAULT_TTS_MAX_RATE; // верхняя граница темпа (живо из mnemosyne_tts_max_rate)
     let ttsOffsetMs = DEFAULT_TTS_OFFSET_MS; // сдвиг озвучки/субтитров относительно видео (живо)
     let ttsSession = 0; // счётчик сессий озвучки — префикс cacheId, чтобы префетч не путал видео
     const plannedRate = new Map<number, number>(); // rate по индексу: один и тот же для prefetch и speak
@@ -697,7 +697,7 @@ export default defineContentScript({
         | undefined;
       const segments = response?.segments ?? null;
       if (segments === null || segments.length === 0) {
-        console.info('[CVM] озвучивать нечего: перевода на язык в кэше нет');
+        console.info('[Mnemosyne] озвучивать нечего: перевода на язык в кэше нет');
         return;
       }
       await ensureVoicesLoaded();
@@ -714,7 +714,7 @@ export default defineContentScript({
       ttsIndex = indexForTime(videoNowMs());
       attachVideoListeners();
       console.info(
-        `[CVM] TTS запущен: ${ttsSegments.length} реплик, движок "${ttsEngine}", голос "${currentVoiceName() || '(авто)'}"`,
+        `[Mnemosyne] TTS запущен: ${ttsSegments.length} реплик, движок "${ttsEngine}", голос "${currentVoiceName() || '(авто)'}"`,
       );
     }
 
@@ -735,17 +735,17 @@ export default defineContentScript({
     ): Promise<void> {
       if (baseLanguage(originalLanguage) === baseLanguage(targetLanguage)) {
         console.info(
-          `[CVM] целевой язык совпадает с оригиналом (${originalLanguage}) — перевод API не нужен`,
+          `[Mnemosyne] целевой язык совпадает с оригиналом (${originalLanguage}) — перевод API не нужен`,
         );
         return;
       }
       if (hasApiTranslation) {
-        console.info(`[CVM] перевод API "${targetLanguage}" уже в кэше — пропуск`);
+        console.info(`[Mnemosyne] перевод API "${targetLanguage}" уже в кэше — пропуск`);
         return;
       }
       const apiKey = await settings.apiKey.getValue();
       if (apiKey.trim() === '') {
-        console.warn('[CVM] API-ключ не задан — перевод через API пропущен (укажи ключ в popup)');
+        console.warn('[Mnemosyne] API-ключ не задан — перевод через API пропущен (укажи ключ в popup)');
         return;
       }
       const request: ApiTranslateMessage = {
@@ -758,9 +758,9 @@ export default defineContentScript({
         | ApiTranslateResponse
         | undefined;
       if (response?.ok === true) {
-        console.info(`[CVM] перевод API "${targetLanguage}" готов и закэширован`);
+        console.info(`[Mnemosyne] перевод API "${targetLanguage}" готов и закэширован`);
       } else {
-        console.warn(`[CVM] перевод API не выполнен: ${response?.error ?? 'нет ответа'}`);
+        console.warn(`[Mnemosyne] перевод API не выполнен: ${response?.error ?? 'нет ответа'}`);
       }
     }
 
@@ -787,19 +787,19 @@ export default defineContentScript({
           : cached?.hasApiTranslation === true;
         if (haveNeeded) {
           currentVideoId = urlVideoId;
-          console.info('[CVM] перевод уже в кэше — извлечение пропущено, старт озвучки');
+          console.info('[Mnemosyne] перевод уже в кэше — извлечение пропущено, старт озвучки');
           return; // startTts подхватит готовый перевод из кэша
         }
       }
 
       const data = await requestExtraction();
       if (data.videoId === null) {
-        console.warn('[CVM] не удалось определить videoId — извлечение пропущено');
+        console.warn('[Mnemosyne] не удалось определить videoId — извлечение пропущено');
         return;
       }
       if (data.error !== null || data.capturedUrl === null || data.capturedBody === null) {
         console.warn(
-          '[CVM] не удалось перехватить субтитры. Включи CC на видео и нажми кнопку снова.',
+          '[Mnemosyne] не удалось перехватить субтитры. Включи CC на видео и нажми кнопку снова.',
         );
         return;
       }
@@ -829,7 +829,7 @@ export default defineContentScript({
       if (!useYoutubeTranslation) {
         const originalSegments = parseSegments(data.capturedBody);
         if (originalSegments.length === 0) {
-          console.warn('[CVM] перехваченный оригинал пуст — кэш не записан');
+          console.warn('[Mnemosyne] перехваченный оригинал пуст — кэш не записан');
           return;
         }
         // Точные символы оригинала известны — обновляем строку стоимости в виджете.
@@ -846,7 +846,7 @@ export default defineContentScript({
             original: originalSegments,
           };
           await browser.runtime.sendMessage(store);
-          console.info(`[CVM] закэширован оригинал: ${originalSegments.length} сегм.`);
+          console.info(`[Mnemosyne] закэширован оригинал: ${originalSegments.length} сегм.`);
         }
         await maybeTranslateViaApi(
           data.videoId,
@@ -861,19 +861,19 @@ export default defineContentScript({
       // Автоперевод включён. Целевой язык совпадает с оригиналом — переводить нечего.
       if (baseLanguage(originalLanguage) === baseLanguage(targetLanguage)) {
         console.info(
-          `[CVM] целевой язык совпадает с оригиналом (${originalLanguage}) — автоперевод не нужен`,
+          `[Mnemosyne] целевой язык совпадает с оригиналом (${originalLanguage}) — автоперевод не нужен`,
         );
         return;
       }
       // Автоперевод на этот язык уже есть — извлечение пропускаем.
       if (lookupResponse?.hasTranslation === true) {
-        console.info(`[CVM] автоперевод "${targetLanguage}" уже в кэше — пропуск`);
+        console.info(`[Mnemosyne] автоперевод "${targetLanguage}" уже в кэше — пропуск`);
         return;
       }
 
       const originalSegments = parseSegments(data.capturedBody);
       if (originalSegments.length === 0) {
-        console.warn('[CVM] перехваченный оригинал пуст — кэш не записан');
+        console.warn('[Mnemosyne] перехваченный оригинал пуст — кэш не записан');
         return;
       }
       const translationSegments = await fetchTranslation(data.capturedUrl, targetLanguage);
@@ -887,7 +887,7 @@ export default defineContentScript({
       };
       await browser.runtime.sendMessage(store);
       console.info(
-        `[CVM] закэшировано: оригинал ${originalSegments.length} / автоперевод "${targetLanguage}" ${translationSegments.length} сегм.`,
+        `[Mnemosyne] закэшировано: оригинал ${originalSegments.length} / автоперевод "${targetLanguage}" ${translationSegments.length} сегм.`,
       );
     }
 
@@ -958,7 +958,7 @@ export default defineContentScript({
           await startTts(currentVideoId);
         }
       } catch (error: unknown) {
-        console.error('[CVM] извлечение субтитров не удалось', error);
+        console.error('[Mnemosyne] извлечение субтитров не удалось', error);
       } finally {
         pipelineInFlight = false;
       }
@@ -1109,11 +1109,11 @@ export default defineContentScript({
       style.textContent = WIDGET_STYLES;
 
       const btn = document.createElement('button');
-      btn.className = 'cvm-toggle';
+      btn.className = 'mnemosyne-toggle';
       btn.addEventListener('click', toggle);
 
       const cost = document.createElement('div');
-      cost.className = 'cvm-cost';
+      cost.className = 'mnemosyne-cost';
       cost.hidden = true;
 
       shadow.append(style, btn, cost);
@@ -1128,7 +1128,7 @@ export default defineContentScript({
       const host = document.createElement('div');
       host.id = SUBS_HOST_ID;
       // На всю площадь плеера (inset:0), поверх него, без перехвата кликов (контролы под нами
-      // кликабельны). Полная высота нужна, чтобы top:50% у .cvm-subs давал реальный центр.
+      // кликабельны). Полная высота нужна, чтобы top:50% у .mnemosyne-subs давал реальный центр.
       host.style.cssText = 'position:absolute;inset:0;z-index:1000;pointer-events:none;';
 
       const shadow = host.attachShadow({ mode: 'open' });
@@ -1136,22 +1136,22 @@ export default defineContentScript({
       style.textContent = SUBS_STYLES;
 
       const box = document.createElement('div');
-      box.className = 'cvm-subs';
+      box.className = 'mnemosyne-subs';
       box.hidden = true;
 
       const prev = document.createElement('div');
-      prev.className = 'cvm-sub cvm-sub-prev';
+      prev.className = 'mnemosyne-sub mnemosyne-sub-prev';
 
       const cur = document.createElement('div');
-      cur.className = 'cvm-sub cvm-sub-cur';
+      cur.className = 'mnemosyne-sub mnemosyne-sub-cur';
       const rate = document.createElement('span');
-      rate.className = 'cvm-sub-rate';
+      rate.className = 'mnemosyne-sub-rate';
       const curText = document.createElement('span');
-      curText.className = 'cvm-sub-cur-text';
+      curText.className = 'mnemosyne-sub-cur-text';
       cur.append(rate, curText);
 
       const next = document.createElement('div');
-      next.className = 'cvm-sub cvm-sub-next';
+      next.className = 'mnemosyne-sub mnemosyne-sub-next';
 
       box.append(prev, cur, next);
       shadow.append(style, box);
@@ -1208,6 +1208,6 @@ export default defineContentScript({
       void applyAutoStart();
     });
 
-    console.info('[CVM] content (isolated) loaded');
+    console.info('[Mnemosyne] content (isolated) loaded');
   },
 });

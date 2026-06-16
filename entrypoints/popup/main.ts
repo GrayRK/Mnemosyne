@@ -17,7 +17,7 @@ import type { TranslationStatus, TtsEngineName } from '@/lib/types';
 function requireEl<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id);
   if (node === null) {
-    throw new Error(`[CVM] popup: элемент #${id} не найден`);
+    throw new Error(`[Mnemosyne] popup: элемент #${id} не найден`);
   }
   return node as T;
 }
@@ -278,7 +278,7 @@ async function init(): Promise<void> {
   await populateVoices();
   registerHandlers();
   setStatus('ready');
-  console.info('[CVM] popup ready');
+  console.info('[Mnemosyne] popup ready');
 }
 
 document.addEventListener('DOMContentLoaded', () => {

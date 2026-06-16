@@ -120,14 +120,14 @@ if (
   monitorBodyEl === null ||
   monitorCloseEl === null
 ) {
-  throw new Error('[CVM] inspector: разметка не найдена');
+  throw new Error('[Mnemosyne] inspector: разметка не найдена');
 }
 
 // Типизированный доступ к обязательным элементам (без длинных null-проверок).
 function requireEl<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id);
   if (node === null) {
-    throw new Error(`[CVM] inspector: нет элемента #${id}`);
+    throw new Error(`[Mnemosyne] inspector: нет элемента #${id}`);
   }
   return node as T;
 }
@@ -986,7 +986,7 @@ function init(): void {
   initTtsPanel();
 
   connect();
-  console.info('[CVM] inspector ready');
+  console.info('[Mnemosyne] inspector ready');
 }
 
 document.addEventListener('DOMContentLoaded', init);
