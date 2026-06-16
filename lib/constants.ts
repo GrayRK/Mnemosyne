@@ -254,7 +254,7 @@ export const TTS_NEURAL_HINT = 'neural';
 // через VPN — для отладки. Адрес эндпоинта настраивается в Inspector (mnemosyne_tts_endpoint).
 // По умолчанию — общий Cloudflare Worker проекта (вне РФ, обходит блокировку + Origin).
 // Конечному пользователю настройка не нужна. Локальный релей (127.0.0.1:5599) — для отладки.
-export const DEFAULT_TTS_ENDPOINT = 'https://cvm-edge-tts.aksenovgeorgiy.workers.dev/tts';
+export const DEFAULT_TTS_ENDPOINT = 'https://mnemosyne-edge-tts.aksenovgeorgiy.workers.dev/tts';
 export const EDGE_TTS_SYNTH_TIMEOUT_MS = 12000; // таймаут одного запроса к эндпоинту
 export const EDGE_TTS_AUDIO_MIME = 'audio/mpeg';
 // Ретраи синтеза у Worker: большинство сбоев транзиентны (холодный старт CF / таймаут).

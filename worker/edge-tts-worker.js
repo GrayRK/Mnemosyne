@@ -1,5 +1,5 @@
 /**
- * Cloudflare Worker — прокси к Edge нейронному TTS для ClaudeVoiceMaster (Стадия 4).
+ * Cloudflare Worker — прокси к Edge нейронному TTS для Mnemosyne (Стадия 4).
  *
  * Зачем: прямой эндпоинт Microsoft недоступен из браузера (нельзя задать Origin/User-Agent)
  * и заблокирован в РФ по DPI. Worker живёт вне РФ и НЕ браузер — он спокойно ставит нужные
@@ -44,7 +44,7 @@ export default {
   async fetch(request) {
     const url = new URL(request.url);
     if (url.pathname !== '/tts') {
-      return new Response('CVM edge-tts worker ok', { headers: CORS });
+      return new Response('Mnemosyne edge-tts worker ok', { headers: CORS });
     }
     const text = (url.searchParams.get('text') || '').trim();
     const voice = url.searchParams.get('voice') || 'ru-RU-DmitryNeural';

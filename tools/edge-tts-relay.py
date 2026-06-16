@@ -1,5 +1,5 @@
 """
-Локальный релей Edge нейронного TTS для расширения ClaudeVoiceMaster (Стадия 4).
+Локальный релей Edge нейронного TTS для расширения Mnemosyne (Стадия 4).
 
 Зачем: прямой эндпоинт Microsoft из браузера недоступен (сервер рвёт рукопожатие — браузер
 не даёт задать нужные Origin/User-Agent). Из обычного Python-клиента пакет `edge-tts`
@@ -17,8 +17,8 @@
 
 Прокси (хост Microsoft часто заблокирован в РФ — гоним трафик через VPN):
     По умолчанию релей ходит к Microsoft через http://127.0.0.1:7890 (mixed-port Clash).
-    Переопределить:   set CVM_TTS_PROXY=http://127.0.0.1:7890   (Windows)
-    Отключить прокси: set CVM_TTS_PROXY=none
+    Переопределить:   set MNEMOSYNE_TTS_PROXY=http://127.0.0.1:7890   (Windows)
+    Отключить прокси: set MNEMOSYNE_TTS_PROXY=none
 
 Безопасность: слушает только 127.0.0.1 (наружу не торчит).
 """
@@ -33,8 +33,8 @@ PORT = 5599
 DEFAULT_VOICE = "ru-RU-DmitryNeural"
 DEFAULT_RATE = "+0%"
 
-# Прокси к Microsoft: env CVM_TTS_PROXY, по умолчанию mixed-port Clash. 'none' — без прокси.
-_proxy_env = os.environ.get("CVM_TTS_PROXY", "http://127.0.0.1:7890")
+# Прокси к Microsoft: env MNEMOSYNE_TTS_PROXY, по умолчанию mixed-port Clash. 'none' — без прокси.
+_proxy_env = os.environ.get("MNEMOSYNE_TTS_PROXY", "http://127.0.0.1:7890")
 PROXY = None if _proxy_env.lower() == "none" else _proxy_env
 
 
@@ -73,8 +73,8 @@ def main() -> None:
     app = web.Application()
     app.router.add_get("/tts", handle_tts)
     app.router.add_get("/health", handle_health)
-    print(f"[CVM edge-tts relay] слушаю http://{HOST}:{PORT}  (Ctrl+C — стоп)")
-    print(f"[CVM edge-tts relay] прокси к Microsoft: {PROXY or 'нет (прямое подключение)'}")
+    print(f"[Mnemosyne edge-tts relay] слушаю http://{HOST}:{PORT}  (Ctrl+C — стоп)")
+    print(f"[Mnemosyne edge-tts relay] прокси к Microsoft: {PROXY or 'нет (прямое подключение)'}")
     web.run_app(app, host=HOST, port=PORT, print=None)
 
 

@@ -1,8 +1,8 @@
-name = "cvm-edge-tts"
+name = "mnemosyne-edge-tts"
 main = "edge-tts-worker.js"
 compatibility_date = "2025-01-01"
 workers_dev = true
 
 # Деплой: wrangler login && wrangler deploy
-# После деплоя URL вида https://cvm-edge-tts.<твой-аккаунт>.workers.dev
+# После деплоя URL вида https://mnemosyne-edge-tts.<твой-аккаунт>.workers.dev
 # Вставить этот URL (+ /tts) в Inspector → «Озвучка (TTS)» → поле эндпоинта.
