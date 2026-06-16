@@ -5,7 +5,7 @@ import { homedir } from 'node:os';
 // Постоянный профиль Chrome для dev: логин в YouTube и cookie-согласие
 // сохраняются между запусками (иначе web-ext поднимает чистый профиль).
 // Папка ВНЕ проекта — иначе Vite-вотчер падает на залоченных Chrome файлах.
-const CHROME_PROFILE_DIR = resolve(homedir(), '.cvm-chrome-profile');
+const CHROME_PROFILE_DIR = resolve(homedir(), '.mnemosyne-chrome-profile');
 
 // Конфиг расширения. Часть полей manifest задаётся здесь (заменяет manifest.json).
 // imports: false — отключаем авто-импорты WXT, используем явные импорты из '#imports'.
@@ -20,8 +20,8 @@ export default defineConfig({
     chromiumArgs: ['--disable-blink-features=AutomationControlled'],
   },
   manifest: {
-    name: 'ClaudeVoiceMaster',
-    description: 'Перевод и озвучка субтитров YouTube в реальном времени.',
+    name: 'Mnemosyne',
+    description: 'Mnemosyne — перевод и нейронная озвучка видео-субтитров на любом языке.',
     permissions: ['storage'],
     // Доступ из service worker: API перевода (aiprimetech.io) + прокси Edge TTS (Стадия 4):
     // Cloudflare Worker (*.workers.dev) и/или локальный релей (127.0.0.1). Порт в match-паттерн

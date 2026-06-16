@@ -1,6 +1,6 @@
 {
-  "name": "claude-voice-master",
-  "description": "Перевод и озвучка субтитров YouTube в реальном времени.",
+  "name": "mnemosyne",
+  "description": "Mnemosyne — перевод и нейронная озвучка видео-субтитров на любом языке.",
   "private": true,
   "version": "0.0.1",
   "type": "module",
