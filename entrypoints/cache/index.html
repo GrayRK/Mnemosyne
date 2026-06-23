@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mnemosyne — Кэш текстов</title>
+    <style>
+      /* Стиль Mnemosyne (этап 1.2): дизайн-токены --m-* инжектятся из lib/theme.ts
+         (buildThemeCss(':root')) в main.ts — здесь только их потребляем. */
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: var(--m-space-6);
+        font-family: var(--m-font-ui);
+        color: var(--m-text);
+        background: var(--m-bg);
+      }
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        max-width: 760px;
+        margin: 0 auto var(--m-space-5);
+        gap: var(--m-space-4);
+      }
+      .head-brand {
+        display: flex;
+        align-items: center;
+        gap: var(--m-space-3);
+      }
+      .head-brand img {
+        height: 26px;
+        display: block;
+      }
+
+      /* --- Меню кэша текстов --- */
+      .cache {
+        max-width: 760px;
+        margin: 0 auto;
+      }
+      .cache-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: var(--m-space-3);
+        gap: var(--m-space-3);
+      }
+      .cache-head h2 {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--m-text-strong);
+      }
+      .cache-actions {
+        display: flex;
+        gap: var(--m-space-2);
+      }
+      .cache-sort,
+      .cache-clear {
+        font-family: inherit;
+        font-size: 13px;
+        color: var(--m-text);
+        background: transparent;
+        border: 1px solid var(--m-border);
+        border-radius: var(--m-radius-sm);
+        padding: 6px 12px;
+        cursor: pointer;
+        transition: border-color 0.15s ease, color 0.15s ease;
+      }
+      .cache-sort:hover:not(:disabled) {
+        border-color: var(--m-accent);
+      }
+      .cache-clear:hover:not(:disabled) {
+        border-color: var(--m-danger);
+        color: var(--m-danger-hover);
+      }
+      .cache-sort:disabled,
+      .cache-clear:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+      .cache-empty {
+        color: var(--m-text-muted);
+        font-size: 14px;
+        padding: var(--m-space-4);
+        text-align: center;
+        background: var(--m-surface);
+        border: 1px solid var(--m-border);
+        border-radius: var(--m-radius);
+      }
+      .cache-item {
+        background: var(--m-surface);
+        border: 1px solid var(--m-border);
+        border-radius: var(--m-radius);
+        margin-bottom: var(--m-space-2);
+        overflow: hidden;
+      }
+      .ci-head {
+        display: flex;
+        align-items: center;
+        gap: var(--m-space-3);
+        padding: 10px var(--m-space-3);
+        cursor: pointer;
+        user-select: none;
+      }
+      .ci-head:hover {
+        background: var(--m-accent-soft);
+      }
+      /* Превью видео 16:9 (как миниатюра в списке YouTube). */
+      .ci-thumb {
+        position: relative;
+        flex: 0 0 auto;
+        width: 160px;
+        aspect-ratio: 16 / 9;
+        border-radius: var(--m-radius-sm);
+        overflow: hidden;
+        background: var(--m-surface-inset);
+      }
+      .ci-thumb img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
+      /* Колонка с названием и метаданными. */
+      .ci-main {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding-top: 2px;
+      }
+      .ci-title {
+        font-size: 14px;
+        font-weight: 600;
+        line-height: 1.35;
+        color: var(--m-text-strong);
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .ci-meta {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 6px;
+        font-size: 12px;
+        color: var(--m-text-muted);
+      }
+      .ci-meta-dot {
+        color: var(--m-text-faint);
+      }
+      .ci-time {
+        font-variant-numeric: tabular-nums;
+      }
+      /* Чипы доступных языков перевода. */
+      .ci-langs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .ci-lang {
+        font-size: 11px;
+        line-height: 1;
+        text-transform: uppercase;
+        letter-spacing: var(--m-tracking-label);
+        color: var(--m-text-muted);
+        background: var(--m-surface-2);
+        border: 1px solid var(--m-border);
+        border-radius: var(--m-radius-pill);
+        padding: 4px 8px;
+      }
+      /* Перевод Claude API выделяем акцентом. */
+      .ci-lang.api {
+        color: var(--m-brand-2);
+        border-color: var(--m-accent);
+        background: var(--m-accent-soft);
+      }
+      /* Правый столбец: ссылка-открыть + каретка раскрытия. */
+      .ci-aside {
+        flex: 0 0 auto;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: var(--m-space-2);
+      }
+      /* Кнопка «смотреть видео» — icon-кнопка в стиле проекта (play). */
+      .ci-link {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 38px;
+        height: 38px;
+        color: var(--m-on-accent);
+        background: var(--m-accent);
+        border-radius: var(--m-radius-sm);
+        font-size: 13px;
+        line-height: 1;
+        text-decoration: none;
+        padding-left: 2px; /* оптическая компенсация треугольника */
+        transition: background-color 0.15s ease;
+      }
+      .ci-link:hover {
+        background: var(--m-accent-hover);
+      }
+      .ci-link:active {
+        background: var(--m-accent-press);
+      }
+      /* Кнопка «удалить переводы видео» — вторичная, danger на hover. */
+      .ci-del {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 38px;
+        height: 38px;
+        color: var(--m-text-muted);
+        background: var(--m-surface-2);
+        border: 1px solid var(--m-border);
+        border-radius: var(--m-radius-sm);
+        cursor: pointer;
+        transition: color 0.15s ease, border-color 0.15s ease;
+      }
+      .ci-del:hover {
+        color: var(--m-danger-hover);
+        border-color: var(--m-danger);
+      }
+      /* Плавное сворачивание/разворачивание: анимируем строку грида 0fr→1fr
+         (высота content'а интерполируется без фиксированных значений).
+         Промежуточный .ci-body-clip с overflow:hidden даёт схлопывание ровно в 0. */
+      .ci-body {
+        display: grid;
+        grid-template-rows: 0fr;
+        transition: grid-template-rows 0.28s ease;
+      }
+      .cache-item.open .ci-body {
+        grid-template-rows: 1fr;
+      }
+      .ci-body-clip {
+        overflow: hidden;
+        min-height: 0;
+      }
+      .ci-body-content {
+        display: flex;
+        flex-direction: column;
+        gap: var(--m-space-3);
+        border-top: 1px solid var(--m-border);
+        padding: 12px 14px;
+      }
+      .banner-label {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--m-text-muted);
+        text-transform: uppercase;
+        letter-spacing: var(--m-tracking-label);
+        margin-bottom: 6px;
+      }
+      .banner-text {
+        font-size: 13px;
+        line-height: 1.5;
+        color: var(--m-text);
+        white-space: pre-wrap;
+        max-height: 180px;
+        overflow-y: auto;
+        background: var(--m-surface-inset);
+        border: 1px solid var(--m-border);
+        border-radius: var(--m-radius-sm);
+        padding: 10px;
+      }
+      .banner-text.placeholder {
+        color: var(--m-text-muted);
+        font-style: italic;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="head-brand">
+        <img src="/brand/logo-lockup.svg" alt="Mnemosyne" />
+      </div>
+    </header>
+
+    <section class="cache">
+      <div class="cache-head">
+        <h2>Кэш текстов</h2>
+        <div class="cache-actions">
+          <button id="cache-sort" class="cache-sort" type="button">↓ Сначала новые</button>
+          <button id="cache-clear" class="cache-clear" type="button">Очистить кэш</button>
+        </div>
+      </div>
+      <div id="cache-list"></div>
+    </section>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

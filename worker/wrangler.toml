@@ -5,4 +5,4 @@ workers_dev = true
 
 # Деплой: wrangler login && wrangler deploy
 # После деплоя URL вида https://mnemosyne-edge-tts.<твой-аккаунт>.workers.dev
-# Вставить этот URL (+ /tts) в Inspector → «Озвучка (TTS)» → поле эндпоинта.
+# Этот URL (+ /tts) — значение настройки mnemosyne_tts_endpoint (DEFAULT_TTS_ENDPOINT).

@@ -22,7 +22,10 @@ export default defineConfig({
   manifest: {
     name: 'Mnemosyne',
     description: 'Mnemosyne — перевод и нейронная озвучка видео-субтитров на любом языке.',
-    permissions: ['storage'],
+    // activeTab — чтобы popup мог прочитать URL/заголовок активной вкладки (карточка
+    // «Текущее видео»): определить videoId и превью. Доступ выдаётся при клике по иконке
+    // расширения, без широкого предупреждения «читать историю».
+    permissions: ['storage', 'activeTab'],
     // Доступ из service worker: API перевода (aiprimetech.io) + прокси Edge TTS (Стадия 4):
     // Cloudflare Worker (*.workers.dev) и/или локальный релей (127.0.0.1). Порт в match-паттерн
     // не входит — покрывает любой. Для своего домена Worker'а добавь сюда его хост.

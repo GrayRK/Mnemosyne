@@ -1,7 +1,7 @@
 import { defineContentScript, browser } from '#imports';
 import { settings } from '@/lib/storage';
-import { costSamples, computeStats } from '@/lib/calibration';
 import { createTtsEngine, ensureVoicesLoaded } from '@/lib/tts';
+import { buildThemeCss } from '@/lib/theme';
 import type { CaptionSegment, TtsEngineName } from '@/lib/types';
 import type {
   BackgroundMessage,
@@ -25,12 +25,9 @@ import {
   WIDGET_LABEL_START,
   WIDGET_LABEL_STOP,
   WIDGET_LABEL_TRANSLATING,
-  WIDGET_COST_PREFIX,
-  WIDGET_COST_NO_DATA,
   SUBS_HOST_ID,
   SUBS_RATE_PREFIX,
   DEFAULT_SUBTITLES_ENABLED,
-  API_MODEL,
   BRIDGE_MESSAGE_SOURCE,
   TIMEDTEXT_FORMAT,
   TIMEDTEXT_FORMAT_PARAM,
@@ -46,6 +43,14 @@ import {
   DEFAULT_TTS_ENGINE,
   DEFAULT_SELECTED_VOICE_EDGE,
   DEFAULT_SUBS_POSITION_PCT,
+  SUBS_EDGE_MARGIN_PCT,
+  DEFAULT_SUBS_BG_OPACITY,
+  DEFAULT_SUBS_SIZE_PCT,
+  DEFAULT_SUBS_SHOW_NEIGHBORS,
+  DEFAULT_SUBS_SHOW_RATE,
+  DEFAULT_SUBS_FONT,
+  subsFontStack,
+  PERCENT_SCALE,
   EDGE_VOICE_CATALOG,
   VIDEO_SELECTOR,
   DUCK_RESTORE_MS,
@@ -56,39 +61,25 @@ const YT_NAVIGATE_EVENT = 'yt-navigate-finish';
 
 const WIDGET_STYLES = `
   .mnemosyne-toggle {
-    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-family: var(--m-font-ui);
     font-size: 13px;
     font-weight: 600;
-    color: #fff;
-    background: rgba(124, 58, 237, 0.92);
+    color: var(--m-on-accent);
+    background: var(--m-accent);
     border: none;
-    border-radius: 8px;
+    border-radius: var(--m-radius-sm);
     padding: 8px 14px;
     cursor: pointer;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    box-shadow: var(--m-shadow-card);
   }
   .mnemosyne-toggle:hover {
-    background: rgba(124, 58, 237, 1);
+    background: var(--m-accent-hover);
   }
   .mnemosyne-toggle[data-active='true'] {
-    background: rgba(220, 38, 38, 0.92);
+    background: var(--m-danger);
   }
   .mnemosyne-toggle[data-active='true']:hover {
-    background: rgba(220, 38, 38, 1);
-  }
-  .mnemosyne-cost {
-    margin-top: 6px;
-    font-family: 'Segoe UI', system-ui, sans-serif;
-    font-size: 12px;
-    color: #fff;
-    background: rgba(0, 0, 0, 0.6);
-    border-radius: 6px;
-    padding: 4px 8px;
-    text-align: center;
-    white-space: nowrap;
-  }
-  .mnemosyne-cost[hidden] {
-    display: none;
+    background: var(--m-danger-hover);
   }
 `;
 
@@ -98,16 +89,20 @@ const SUBS_STYLES = `
   .mnemosyne-subs {
     position: absolute;
     left: 50%;
-    top: 50%;
-    transform: translate(-50%, -50%);
+    /* top и transform (вертикальное положение + центрирование по X) задаёт applySubsPosition. */
+    transform: translateX(-50%);
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 6px;
+    gap: 0.8cqh;
+    /* Ширина блока — доля ширины плеера (без абсолютного потолка в px): иначе в фуллскрине
+       ширина строки упирается в фикс. потолок, а шрифт растёт (cqh) → текст переносится
+       сильнее и пропорция ломается. 84% ширины при cqh-шрифте даёт постоянное число
+       символов в строке независимо от размера плеера. */
     width: 84%;
-    max-width: 980px;
     pointer-events: none;
-    font-family: 'Segoe UI', system-ui, sans-serif;
+    /* --sub-font / --sub-scale задаются из настроек (applySubsStyle). */
+    font-family: var(--sub-font, var(--m-font-ui));
     text-align: center;
   }
   .mnemosyne-subs[hidden] {
@@ -118,35 +113,41 @@ const SUBS_STYLES = `
   }
   .mnemosyne-sub-prev,
   .mnemosyne-sub-next {
-    font-size: 18px;
+    font-size: calc((6px + 1.8cqh) * var(--sub-scale, 1));
     color: rgba(255, 255, 255, 0.5);
-    background: rgba(0, 0, 0, 0.4);
-    border-radius: 6px;
-    padding: 1px 8px;
+    background: rgba(0, 0, 0, var(--sub-bg-alpha, 0.58));
+    border-radius: 0.3em;
+    padding: 0.08em 0.4em;
     text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
   }
   .mnemosyne-sub-cur {
     display: inline-flex;
     align-items: center;
-    gap: 10px;
+    gap: 1.2cqh;
     max-width: 100%;
   }
+  .mnemosyne-sub-rate[hidden] {
+    display: none;
+  }
   .mnemosyne-sub-cur-text {
-    font-size: 26px;
+    /* Сублинейный размер: px-база + доля высоты плеера (cqh). База держит читаемость в
+       маленьком окне, cqh-часть растёт в фуллскрине, но медленнее экрана — иначе субтитры
+       воспринимаются «слишком крупными» (восприятие зависит от дистанции, не только от % высоты). */
+    font-size: calc((9px + 2.6cqh) * var(--sub-scale, 1));
     font-weight: 700;
     color: #fff;
-    background: rgba(0, 0, 0, 0.58);
-    border-radius: 8px;
-    padding: 2px 12px;
+    background: rgba(0, 0, 0, var(--sub-bg-alpha, 0.58));
+    border-radius: 0.3em;
+    padding: 0.1em 0.45em;
     text-shadow: 0 2px 6px rgba(0, 0, 0, 0.95);
   }
   .mnemosyne-sub-rate {
-    font-size: 16px;
+    font-size: calc((5px + 1.6cqh) * var(--sub-scale, 1));
     font-weight: 700;
-    color: #fff;
-    background: rgba(124, 58, 237, 0.95);
-    border-radius: 6px;
-    padding: 2px 8px;
+    color: var(--m-on-accent);
+    background: var(--m-accent);
+    border-radius: 0.3em;
+    padding: 0.1em 0.4em;
     white-space: nowrap;
     flex: none;
   }
@@ -307,33 +308,6 @@ export default defineContentScript({
     let currentVideoId: string | null = null; // видео текущего пайплайна (для индикатора)
     let progressText: string | null = null; // подпись прогресса перевода или null
 
-    // --- Показ примерной стоимости в виджете (Стадия 3.4) ---
-    let costEl: HTMLElement | null = null;
-    let showCost = false; // флаг из настроек
-    let dollarsPerChar = 0; // R из калибровки (0 — нет данных)
-    let currentOriginalChars: number | null = null; // символы оригинала текущего видео
-
-    function formatMoney(value: number): string {
-      return value < 0.01 ? `$${value.toFixed(4)}` : `$${value.toFixed(2)}`;
-    }
-
-    // Перерисовать строку стоимости: точные символы оригинала × R.
-    function renderCost(): void {
-      if (costEl === null) {
-        return;
-      }
-      if (!showCost || currentOriginalChars === null) {
-        costEl.hidden = true; // флаг выключен или символы ещё неизвестны
-        return;
-      }
-      costEl.hidden = false;
-      if (dollarsPerChar > 0) {
-        costEl.textContent = WIDGET_COST_PREFIX + formatMoney(currentOriginalChars * dollarsPerChar);
-      } else {
-        costEl.textContent = WIDGET_COST_NO_DATA; // нет калибровки
-      }
-    }
-
     // =====================================================================
     // Озвучка перевода (TTS, Стадия 4) + приглушение оригинала
     // =====================================================================
@@ -354,6 +328,7 @@ export default defineContentScript({
     let videoEl: HTMLVideoElement | null = null; // основной <video> плеера
     let ttsListenersAttached = false; // слушатели событий видео навешаны
     let ttsGen = 0; // поколение озвучки: смена инвалидирует коллбэки прерванной реплики
+    let voiceEnabled = false; // тоггл «Озвучить видео»: false — только субтитры, без синтеза/приглушения
 
     // Приглушение оригинала на время речи (ducking).
     let duckAmount = 0; // доля приглушения 0..MAX_VIDEO_DUCKING
@@ -363,11 +338,19 @@ export default defineContentScript({
     // Караоке-субтитры (оверлей плеера).
     let subtitlesEnabled = DEFAULT_SUBTITLES_ENABLED;
     let subsPositionPct = DEFAULT_SUBS_POSITION_PCT; // вертикальное положение на экране (живо)
+    let subsBgAlpha = DEFAULT_SUBS_BG_OPACITY / PERCENT_SCALE; // прозрачность подложки, 0..1
+    let subsSizePct = DEFAULT_SUBS_SIZE_PCT; // масштаб шрифта субтитров, %
+    let subsShowNeighbors = DEFAULT_SUBS_SHOW_NEIGHBORS; // показывать пред./след. строку
+    let subsShowRate = DEFAULT_SUBS_SHOW_RATE; // показывать плашку темпа ×N
+    let subsFont = subsFontStack(DEFAULT_SUBS_FONT); // CSS-стек шрифта субтитров
     let subsBox: HTMLElement | null = null; // контейнер трёх строк (показ/скрытие через .hidden)
     let subPrevEl: HTMLElement | null = null; // предыдущая строка (тускло)
     let subCurTextEl: HTMLElement | null = null; // текущая строка (ярко)
     let subRateEl: HTMLElement | null = null; // множитель темпа TTS слева от текущей
     let subNextEl: HTMLElement | null = null; // следующая строка (тускло)
+    let lastDisplayIndex = -1; // последняя показанная строка в режиме «только субтитры» (-1 — нет)
+    let lastShownIndex = -1; // индекс последней отрисованной строки (для мгновенной перерисовки)
+    let lastShownRate: number | null = null; // её темп (null — режим субтитров)
 
     function findVideo(): HTMLVideoElement | null {
       return (
@@ -512,15 +495,34 @@ export default defineContentScript({
       }
     }
 
-    // Физическое вертикальное положение субтитров на экране (0 — верх, 100 — низ).
+    // Вертикальное положение: 0 — бокс прижат к низу плеера (с отступом m), 100 — к верху.
+    // Привязка к краям (а не к центру) не даёт субтитрам уехать за плеер при любой высоте бокса:
+    // на v=0 фиксируем нижнюю кромку (translateY −100%), на v=1 — верхнюю (translateY 0%).
     function applySubsPosition(): void {
+      if (subsBox === null) {
+        return;
+      }
+      const v = subsPositionPct / PERCENT_SCALE; // 0..1 (0 — низ, 1 — верх)
+      const m = SUBS_EDGE_MARGIN_PCT;
+      const topPct = 100 - m + v * (2 * m - 100); // от (100−m) при v=0 до m при v=1
+      const translateYPct = (v - 1) * 100; // от −100% при v=0 до 0% при v=1
+      subsBox.style.top = `${topPct}%`;
+      subsBox.style.transform = `translate(-50%, ${translateYPct}%)`;
+    }
+
+    // Масштаб, шрифт и прозрачность подложки — через CSS-переменные на контейнере
+    // (каскадом ко всем строкам).
+    function applySubsStyle(): void {
       if (subsBox !== null) {
-        subsBox.style.top = `${subsPositionPct}%`;
+        subsBox.style.setProperty('--sub-scale', String(subsSizePct / PERCENT_SCALE));
+        subsBox.style.setProperty('--sub-font', subsFont);
+        subsBox.style.setProperty('--sub-bg-alpha', String(subsBgAlpha));
       }
     }
 
-    // Обновить караоке: предыдущая/текущая/следующая строки + множитель темпа текущей.
-    function updateSubs(index: number, rate: number): void {
+    // Обновить караоке: предыдущая/текущая/следующая строки + (опц.) множитель темпа текущей.
+    // rate === null — режим «только субтитры»: плашку темпа не показываем (озвучки нет).
+    function updateSubs(index: number, rate: number | null): void {
       const box = subsBox;
       const prevEl = subPrevEl;
       const curEl = subCurTextEl;
@@ -529,15 +531,65 @@ export default defineContentScript({
       if (box === null || prevEl === null || curEl === null || rateEl === null || nextEl === null) {
         return;
       }
+      lastShownIndex = index; // запоминаем для мгновенной перерисовки при смене настроек
+      lastShownRate = rate;
       if (!subtitlesEnabled) {
         box.hidden = true;
         return;
       }
-      prevEl.textContent = ttsSegments[index - 1]?.text ?? '';
+      // Соседние строки — только если включён режим караоке (иначе показываем одну текущую).
+      prevEl.textContent = subsShowNeighbors ? (ttsSegments[index - 1]?.text ?? '') : '';
       curEl.textContent = ttsSegments[index]?.text ?? '';
-      nextEl.textContent = ttsSegments[index + 1]?.text ?? '';
-      rateEl.textContent = SUBS_RATE_PREFIX + rate.toFixed(1);
+      nextEl.textContent = subsShowNeighbors ? (ttsSegments[index + 1]?.text ?? '') : '';
+      // Плашка темпа — только при озвучке (rate !== null) и при включённой настройке.
+      if (rate !== null && subsShowRate) {
+        rateEl.hidden = false;
+        rateEl.textContent = SUBS_RATE_PREFIX + rate.toFixed(1);
+      } else {
+        rateEl.hidden = true;
+      }
       box.hidden = false;
+    }
+
+    // Мгновенно перерисовать текущую показанную строку (для смены настроек на лету:
+    // режим караоке, плашка темпа), не дожидаясь следующей реплики.
+    function redrawSubs(): void {
+      if (lastShownIndex >= 0) {
+        updateSubs(lastShownIndex, lastShownRate);
+      }
+    }
+
+    // Индекс текущей строки под момент времени (режим субтитров): последняя начавшаяся.
+    // -1 — момент раньше первой реплики.
+    function displayIndexForTime(nowMs: number): number {
+      let idx = -1;
+      for (let i = 0; i < ttsSegments.length; i += 1) {
+        const seg = ttsSegments[i];
+        if (seg !== undefined && seg.start <= nowMs) {
+          idx = i;
+        } else {
+          break; // отсортировано по start — дальше только будущие
+        }
+      }
+      return idx;
+    }
+
+    // Показ субтитров по времени видео без озвучки. Перерисовываем только при смене строки.
+    function updateSubsByTime(): void {
+      if (!subtitlesEnabled) {
+        hideSubs();
+        return;
+      }
+      const idx = displayIndexForTime(videoNowMs());
+      if (idx === lastDisplayIndex) {
+        return;
+      }
+      lastDisplayIndex = idx;
+      if (idx < 0) {
+        hideSubs();
+        return;
+      }
+      updateSubs(idx, null);
     }
 
     function speakSegment(): void {
@@ -583,10 +635,19 @@ export default defineContentScript({
       }
     }
 
-    // Тик синхронизации: на каждый timeupdate проверяем, не пора ли озвучить реплику.
+    // Тик синхронизации (на каждый timeupdate). Два режима:
+    //  - озвучка (voiceEnabled): озвучиваем реплику по времени, субтитры ведёт speakSegment;
+    //  - только субтитры: показываем строку по времени видео, без синтеза/приглушения.
     function onTtsTick(): void {
       const video = videoEl;
-      if (video === null || video.paused) {
+      if (video === null) {
+        return;
+      }
+      if (!voiceEnabled) {
+        updateSubsByTime(); // субтитры обновляем и на паузе (корректная строка после перемотки)
+        return;
+      }
+      if (video.paused) {
         return;
       }
       if (ttsSpeaking || tts.isSpeaking()) {
@@ -632,6 +693,7 @@ export default defineContentScript({
       cancelSpeech();
       unduckInstant();
       ttsIndex = indexForTime(videoNowMs());
+      lastDisplayIndex = -1; // режим субтитров: пересчитать текущую строку под новое время
       onTtsTick();
     }
 
@@ -673,14 +735,18 @@ export default defineContentScript({
       ttsSession += 1; // новая сессия — старые префетчи по cacheId не переиспользуются
       ttsSegments = [];
       ttsIndex = 0;
+      lastDisplayIndex = -1;
       unduckInstant();
       hideSubs();
     }
 
-    // Забрать готовый перевод из кэша и запустить озвучку текущего видео.
+    // Забрать готовый перевод из кэша и запустить показ: озвучку (если включён тоггл) и/или
+    // субтитры по таймингам. Без озвучки сегменты всё равно нужны — для субтитров.
     async function startTts(videoId: string): Promise<void> {
-      stopTts(); // идемпотентный перезапуск (смена языка/настроек)
-      if (!(await settings.ttsEnabled.getValue())) {
+      stopTts(); // идемпотентный перезапуск (смена языка/настроек/тогглов)
+      voiceEnabled = await settings.ttsEnabled.getValue();
+      // Нечего делать, только если выключены и озвучка, и субтитры.
+      if (!voiceEnabled && !subtitlesEnabled) {
         return;
       }
       const targetLanguage = await settings.targetLanguage.getValue();
@@ -697,24 +763,30 @@ export default defineContentScript({
         | undefined;
       const segments = response?.segments ?? null;
       if (segments === null || segments.length === 0) {
-        console.info('[Mnemosyne] озвучивать нечего: перевода на язык в кэше нет');
+        console.info('[Mnemosyne] показывать нечего: перевода на язык в кэше нет');
         return;
       }
-      await ensureVoicesLoaded();
       ttsLang = targetLanguage;
-      ttsEngine = await settings.ttsEngine.getValue();
-      ttsVoiceName = await settings.selectedVoice.getValue();
-      edgeVoiceName = await settings.selectedVoiceEdge.getValue();
-      ttsVolume = await settings.translationVolume.getValue();
-      duckAmount = await settings.videoDucking.getValue();
-      tts.setEngine(ttsEngine);
       ttsSegments = [...segments].sort((a, b) => a.start - b.start);
-      // Старт с реплики под текущее время (не переигрываем то, что уже позади).
       videoEl = findVideo();
-      ttsIndex = indexForTime(videoNowMs());
+
+      if (voiceEnabled) {
+        await ensureVoicesLoaded();
+        ttsEngine = await settings.ttsEngine.getValue();
+        ttsVoiceName = await settings.selectedVoice.getValue();
+        edgeVoiceName = await settings.selectedVoiceEdge.getValue();
+        ttsVolume = await settings.translationVolume.getValue();
+        duckAmount = await settings.videoDucking.getValue();
+        tts.setEngine(ttsEngine);
+        // Старт с реплики под текущее время (не переигрываем то, что уже позади).
+        ttsIndex = indexForTime(videoNowMs());
+      }
       attachVideoListeners();
+      onTtsTick(); // сразу показать текущую строку (режим субтитров) / стартовать озвучку
       console.info(
-        `[Mnemosyne] TTS запущен: ${ttsSegments.length} реплик, движок "${ttsEngine}", голос "${currentVoiceName() || '(авто)'}"`,
+        voiceEnabled
+          ? `[Mnemosyne] озвучка запущена: ${ttsSegments.length} реплик, движок "${ttsEngine}", голос "${currentVoiceName() || '(авто)'}"`
+          : `[Mnemosyne] субтитры без озвучки: ${ttsSegments.length} строк`,
       );
     }
 
@@ -832,12 +904,6 @@ export default defineContentScript({
           console.warn('[Mnemosyne] перехваченный оригинал пуст — кэш не записан');
           return;
         }
-        // Точные символы оригинала известны — обновляем строку стоимости в виджете.
-        currentOriginalChars = originalSegments.reduce(
-          (sum, segment) => sum + segment.text.length,
-          0,
-        );
-        renderCost();
         // Оригинал кэшируем один раз (если записи ещё нет).
         if (lookupResponse?.entryExists !== true) {
           const store: CacheStoreMessage = {
@@ -921,9 +987,6 @@ export default defineContentScript({
     });
 
     function resetActive(): void {
-      // Новое видео / SPA-навигация — стоимость прежнего видео больше не актуальна.
-      currentOriginalChars = null;
-      renderCost();
       // Озвучка прежнего видео больше не нужна (тайминги другого ролика).
       stopTts();
       // Состояние перевода начинается заново.
@@ -986,23 +1049,22 @@ export default defineContentScript({
     settings.targetLanguage.watch(onSettingsChanged);
     settings.useYoutubeTranslation.watch(onSettingsChanged);
 
-    // Стоимость в виджете: подтягиваем флаг и калибровку, живо обновляем при смене.
-    function refreshDollarsPerChar(samples: Parameters<typeof computeStats>[0]): void {
-      dollarsPerChar = computeStats(samples, API_MODEL).dollarsPerChar;
-      renderCost();
+    // Перезапуск показа из кэша (без повторного извлечения): для смены режима озвучка/субтитры.
+    function restartPlayback(): void {
+      if (active && currentVideoId !== null) {
+        void startTts(currentVideoId);
+      }
     }
-    void settings.showCost.getValue().then((value) => {
-      showCost = value;
-      renderCost();
-    });
-    void costSamples.getValue().then(refreshDollarsPerChar);
-    settings.showCost.watch((value) => {
-      showCost = value;
-      renderCost();
-    });
-    costSamples.watch(refreshDollarsPerChar);
 
-    // Караоке-субтитры: флаг из настроек, живое скрытие при выключении.
+    // Тоггл «Озвучить видео»: переключение озвучка ⇄ только субтитры на лету.
+    void settings.ttsEnabled.getValue().then((value) => {
+      voiceEnabled = value;
+    });
+    settings.ttsEnabled.watch(() => {
+      restartPlayback();
+    });
+
+    // Караоке-субтитры: флаг из настроек, живое скрытие/показ.
     void settings.subtitlesEnabled.getValue().then((value) => {
       subtitlesEnabled = value;
       if (!value) {
@@ -1013,6 +1075,15 @@ export default defineContentScript({
       subtitlesEnabled = value;
       if (!value) {
         hideSubs();
+        return;
+      }
+      // Включили субтитры: если сегменты ещё не загружены (были выключены и озвучка, и
+      // субтитры) — поднимаем показ; иначе сразу перерисовываем текущую строку.
+      if (active && ttsSegments.length === 0) {
+        restartPlayback();
+      } else {
+        lastDisplayIndex = -1;
+        onTtsTick();
       }
     });
 
@@ -1023,7 +1094,7 @@ export default defineContentScript({
       tts.clearCache();
     }
 
-    // Диапазон скорости TTS из Inspector — живо применяется к следующим репликам.
+    // Диапазон скорости TTS — живо применяется к следующим репликам.
     void settings.ttsMinRate.getValue().then((value) => {
       ttsMinRate = value;
     });
@@ -1084,6 +1155,53 @@ export default defineContentScript({
       applySubsPosition();
     });
 
+    // Масштаб субтитров (живо).
+    void settings.subsSizePct.getValue().then((value) => {
+      subsSizePct = value;
+      applySubsStyle();
+    });
+    settings.subsSizePct.watch((value) => {
+      subsSizePct = value;
+      applySubsStyle();
+    });
+
+    // Шрифт субтитров (живо). Храним id, применяем CSS-стек.
+    void settings.subsFont.getValue().then((value) => {
+      subsFont = subsFontStack(value);
+      applySubsStyle();
+    });
+    settings.subsFont.watch((value) => {
+      subsFont = subsFontStack(value);
+      applySubsStyle();
+    });
+
+    // Прозрачность подложки субтитров (живо, через CSS-переменную).
+    void settings.subsBgOpacity.getValue().then((value) => {
+      subsBgAlpha = value / PERCENT_SCALE;
+      applySubsStyle();
+    });
+    settings.subsBgOpacity.watch((value) => {
+      subsBgAlpha = value / PERCENT_SCALE;
+      applySubsStyle();
+    });
+
+    // Режим караоke (соседние строки) и плашка темпа — применяются мгновенно: перерисовываем
+    // текущую строку, не дожидаясь следующей реплики.
+    void settings.subsShowNeighbors.getValue().then((value) => {
+      subsShowNeighbors = value;
+    });
+    settings.subsShowNeighbors.watch((value) => {
+      subsShowNeighbors = value;
+      redrawSubs();
+    });
+    void settings.subsShowRate.getValue().then((value) => {
+      subsShowRate = value;
+    });
+    settings.subsShowRate.watch((value) => {
+      subsShowRate = value;
+      redrawSubs();
+    });
+
     // Автозапуск: при открытии страницы/смене видео виджет сам переходит
     // в состояние «включено» и запускает пайплайн (если флаг включён).
     async function applyAutoStart(): Promise<void> {
@@ -1106,21 +1224,15 @@ export default defineContentScript({
 
       const shadow = host.attachShadow({ mode: 'open' });
       const style = document.createElement('style');
-      style.textContent = WIDGET_STYLES;
+      style.textContent = buildThemeCss(':host') + WIDGET_STYLES;
 
       const btn = document.createElement('button');
       btn.className = 'mnemosyne-toggle';
       btn.addEventListener('click', toggle);
 
-      const cost = document.createElement('div');
-      cost.className = 'mnemosyne-cost';
-      cost.hidden = true;
-
-      shadow.append(style, btn, cost);
+      shadow.append(style, btn);
       button = btn;
-      costEl = cost;
       render();
-      renderCost();
       return host;
     }
 
@@ -1129,11 +1241,14 @@ export default defineContentScript({
       host.id = SUBS_HOST_ID;
       // На всю площадь плеера (inset:0), поверх него, без перехвата кликов (контролы под нами
       // кликабельны). Полная высота нужна, чтобы top:50% у .mnemosyne-subs давал реальный центр.
-      host.style.cssText = 'position:absolute;inset:0;z-index:1000;pointer-events:none;';
+      // container-type: size — хост становится CSS-контейнером: размеры субтитров в cqh
+      // (% высоты плеера) масштабируются с плеером (фуллскрин/ресайз окна) автоматически.
+      host.style.cssText =
+        'position:absolute;inset:0;z-index:1000;pointer-events:none;container-type:size;';
 
       const shadow = host.attachShadow({ mode: 'open' });
       const style = document.createElement('style');
-      style.textContent = SUBS_STYLES;
+      style.textContent = buildThemeCss(':host') + SUBS_STYLES;
 
       const box = document.createElement('div');
       box.className = 'mnemosyne-subs';
@@ -1162,6 +1277,7 @@ export default defineContentScript({
       subRateEl = rate;
       subNextEl = next;
       applySubsPosition(); // вертикальное положение из настроек
+      applySubsStyle(); // масштаб и шрифт из настроек
       return host;
     }
 
@@ -1169,7 +1285,6 @@ export default defineContentScript({
       document.getElementById(WIDGET_HOST_ID)?.remove();
       document.getElementById(SUBS_HOST_ID)?.remove();
       button = null;
-      costEl = null;
       subsBox = null;
       subPrevEl = null;
       subCurTextEl = null;

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Mnemosyne — горизонтальный локап (эмблема + надпись) для шапки popup/inspector.
+  Холодный бренд-градиент, разрядка надписи под античный/мнемонический тон.
+-->
+<svg width="372" height="64" viewBox="0 0 372 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="brand" x1="0" y1="8" x2="360" y2="56" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#C9D2EC"/>
+      <stop offset="0.35" stop-color="#BCB1EF"/>
+      <stop offset="0.65" stop-color="#88AEF1"/>
+      <stop offset="1" stop-color="#7256E7"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Эмблема: орбита + монограмма M -->
+  <g transform="translate(8 8)">
+    <circle cx="24" cy="24" r="22" stroke="url(#brand)" stroke-width="1" opacity="0.3"/>
+    <circle cx="3" cy="18" r="1.2" fill="url(#brand)" opacity="0.8"/>
+    <circle cx="42" cy="12" r="1" fill="url(#brand)" opacity="0.65"/>
+    <circle cx="44" cy="34" r="1.2" fill="url(#brand)" opacity="0.8"/>
+    <path d="M13 35 L13 14 L24 27 L35 14 L35 35"
+          stroke="url(#brand)" stroke-width="4"
+          stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <!-- Надпись -->
+  <text x="74" y="41" fill="url(#brand)"
+        font-family="'Segoe UI', system-ui, -apple-system, sans-serif"
+        font-size="26" font-weight="300" letter-spacing="7">MNEMOSYNE</text>
+</svg>

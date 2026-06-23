@@ -126,33 +126,32 @@ export async function upsertApiTranslation(
   return true;
 }
 
-// Записать зафиксированную стоимость перевода в apiMeta[language].
-// Возвращает обновлённый meta (для построения калибровочного замера) или null.
-export async function setApiCost(
-  videoId: string,
-  language: string,
-  costUsd: number,
-): Promise<ApiTranslationMeta | null> {
-  const entry = await getEntry(videoId);
-  if (entry === null) {
-    return null;
-  }
-  const meta = (entry.apiMeta ?? {})[language];
-  if (meta === undefined) {
-    return null;
-  }
-  const updated: ApiTranslationMeta = { ...meta, costUsd };
-  entry.apiMeta = { ...entry.apiMeta, [language]: updated };
-  entry.updatedAt = Date.now();
-  await storage.setItem(entryKey(videoId), entry);
-  await writeMeta(entry);
-  return updated;
+// Метаданные одного видео или null, если оно не кэшировано.
+export async function getMeta(videoId: string): Promise<CvmCacheMeta | null> {
+  const index = await readIndex();
+  return index.find((meta) => meta.videoId === videoId) ?? null;
 }
 
 // Список метаданных, отсортированный по времени создания (новые сверху).
 export async function listMeta(): Promise<CvmCacheMeta[]> {
   const index = await readIndex();
   return [...index].sort((a, b) => b.createdAt - a.createdAt);
+}
+
+// Удалить кэш одного видео (запись + строка индекса).
+export async function removeEntry(videoId: string): Promise<void> {
+  console.info('[Mnemosyne cache] removeEntry старт', videoId, 'key=', entryKey(videoId));
+  await storage.removeItem(entryKey(videoId));
+  const index = await readIndex();
+  const next = index.filter((meta) => meta.videoId !== videoId);
+  console.info(
+    '[Mnemosyne cache] removeEntry индекс',
+    index.map((m) => m.videoId),
+    '→',
+    next.map((m) => m.videoId),
+  );
+  await storage.setItem(CACHE_INDEX_KEY, next);
+  console.info('[Mnemosyne cache] removeEntry готово', videoId);
 }
 
 // Полностью очистить кэш текстов (записи + индекс).

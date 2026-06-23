@@ -40,3 +40,4 @@ desktop.ini
 
 # Локальные настройки Claude Code (персональные, не для общего репозитория)
 .claude/settings.local.json
+reference/

@@ -9,10 +9,11 @@
     "build": "wxt build",
     "zip": "wxt zip",
     "compile": "tsc --noEmit",
-    "icons": "node scripts/gen-icons.mjs",
+    "icons": "node scripts/render-icons.mjs",
     "postinstall": "wxt prepare"
   },
   "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
     "typescript": "^5.7.0",
     "wxt": "^0.20.0"
   }

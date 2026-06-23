@@ -1,7 +1,7 @@
 import { defineBackground, browser } from '#imports';
 import { settings } from '@/lib/storage';
 import {
-  INSPECTOR_PORT_NAME,
+  CACHE_PORT_NAME,
   API_ENDPOINT,
   API_MODEL,
   API_ANTHROPIC_VERSION,
@@ -23,32 +23,30 @@ import {
 } from '@/lib/constants';
 import {
   getEntry,
+  getMeta,
   upsertEntry,
   upsertApiTranslation,
-  setApiCost,
   listMeta,
+  removeEntry,
   clearAll,
 } from '@/lib/cache';
-import { addCostSample } from '@/lib/calibration';
 import { synthesize, audioToBase64 } from '@/lib/edge-tts';
 import type {
-  CvmRuntimeState,
-  TabRuntimeState,
   CaptionSegment,
   TranslationProgress,
   TranslationStatus,
   ApiTranslationMeta,
 } from '@/lib/types';
 import type {
-  InspectorMessage,
-  InspectorControlMessage,
+  CachePortMessage,
+  CachePortControlMessage,
   BackgroundMessage,
   CacheLookupResponse,
   CacheStoreResponse,
   ApiTranslateMessage,
   ApiTranslateResponse,
-  RecordApiCostMessage,
-  RecordApiCostResponse,
+  VideoMetaResponse,
+  DeleteVideoCacheResponse,
   GetTranslationMessage,
   GetTranslationResponse,
   TtsSynthMessage,
@@ -60,46 +58,13 @@ import type {
 type RuntimePort = Parameters<Parameters<typeof browser.runtime.onConnect.addListener>[0]>[0];
 
 export default defineBackground(() => {
-  // Рантайм-состояние per-tab (не сохраняется). Ключ — tabId; у каждой вкладки своё
-  // состояние перевода (Стадия 3.4). Очистка — по browser.tabs.onRemoved.
-  const runtimeStates = new Map<number, CvmRuntimeState>();
+  // Подключённые страницы «История» (кэш) — реестр для рассылки обновлений по порту.
+  const cachePorts = new Set<RuntimePort>();
 
-  function getTabState(tabId: number): CvmRuntimeState {
-    let state = runtimeStates.get(tabId);
-    if (state === undefined) {
-      state = {
-        currentVideoId: null,
-        translationStatus: 'ready',
-        translationActive: false,
-        translationProgress: null,
-      };
-      runtimeStates.set(tabId, state);
-    }
-    return state;
-  }
-
-  function buildRuntimeMessage(): InspectorMessage {
-    const tabs: TabRuntimeState[] = [...runtimeStates.entries()].map(([tabId, state]) => ({
-      tabId,
-      ...state,
-    }));
-    return { type: 'runtime-state', tabs };
-  }
-
-  // Подключённые страницы Inspector — реестр для рассылки обновлений.
-  const inspectorPorts = new Set<RuntimePort>();
-
-  function broadcastRuntimeState(): void {
-    const message = buildRuntimeMessage();
-    for (const port of inspectorPorts) {
-      port.postMessage(message);
-    }
-  }
-
-  // Разослать актуальный список кэша всем открытым Inspector.
+  // Разослать актуальный список кэша всем открытым страницам «История».
   async function broadcastCacheList(): Promise<void> {
-    const message: InspectorMessage = { type: 'cache-list', items: await listMeta() };
-    for (const port of inspectorPorts) {
+    const message: CachePortMessage = { type: 'cache-list', items: await listMeta() };
+    for (const port of cachePorts) {
       port.postMessage(message);
     }
   }
@@ -108,33 +73,26 @@ export default defineBackground(() => {
   // Перевод через Claude API (Стадия 3)
   // =====================================================================
 
-  // Обновить рантайм-состояние перевода: рассылка Inspector + кнопке виджета.
+  // Прогресс перевода → индикатору на кнопке виджета (per-tab).
   function setTranslationRuntime(
     videoId: string | null,
     status: TranslationStatus,
     progress: TranslationProgress | null,
     tabId: number | null,
   ): void {
-    if (tabId === null) {
-      return; // без вкладки состояние не атрибутировать (per-tab)
+    if (tabId === null || videoId === null) {
+      return; // без вкладки/видео индикатор не атрибутировать
     }
-    const state = getTabState(tabId);
-    state.currentVideoId = videoId;
-    state.translationStatus = status;
-    state.translationProgress = progress;
-    broadcastRuntimeState();
-    if (videoId !== null) {
-      const message: TabMessage = {
-        type: 'translation-progress',
-        videoId,
-        done: progress?.done ?? 0,
-        total: progress?.total ?? 0,
-        status,
-      };
-      void browser.tabs.sendMessage(tabId, message).catch(() => {
-        // вкладка закрыта / нет приёмника — индикатор не критичен
-      });
-    }
+    const message: TabMessage = {
+      type: 'translation-progress',
+      videoId,
+      done: progress?.done ?? 0,
+      total: progress?.total ?? 0,
+      status,
+    };
+    void browser.tabs.sendMessage(tabId, message).catch(() => {
+      // вкладка закрыта / нет приёмника — индикатор не критичен
+    });
   }
 
   // Нарезка массива на батчи фиксированного размера.
@@ -487,7 +445,6 @@ export default defineBackground(() => {
         totalMs,
         batchMs: result.batchMs,
         videoSeconds: Math.round(videoMs / 1000),
-        costUsd: null,
         createdAt: Date.now(),
         // Поток отдаётся в Стадии 4 лёгкими сообщениями; в storage пишем целиком и сразу.
         completedBatches: batches.length,
@@ -505,41 +462,6 @@ export default defineBackground(() => {
       setTranslationRuntime(videoId, 'error', null, tabId);
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }
-  }
-
-  // Зафиксировать стоимость перевода: записать costUsd в apiMeta + калибровочный замер.
-  async function handleRecordApiCost(
-    message: RecordApiCostMessage,
-  ): Promise<RecordApiCostResponse> {
-    const { videoId, language, costUsd } = message;
-    if (!(costUsd > 0) || !Number.isFinite(costUsd)) {
-      return { ok: false, error: 'invalid' };
-    }
-    const entry = await getEntry(videoId);
-    const meta = entry === null ? undefined : (entry.apiMeta ?? {})[language];
-    if (meta === undefined) {
-      return { ok: false, error: 'no-meta' };
-    }
-    if (meta.costUsd !== null) {
-      return { ok: false, error: 'already-fixed' };
-    }
-    const updated = await setApiCost(videoId, language, costUsd);
-    if (updated === null) {
-      return { ok: false, error: 'no-meta' };
-    }
-    await addCostSample({
-      dollars: costUsd,
-      chars: meta.charsTotal,
-      tokensIn: meta.inputTokens,
-      tokensOut: meta.outputTokens,
-      videoSeconds: meta.videoSeconds ?? 0,
-      model: meta.model,
-      videoId,
-      language,
-      at: Date.now(),
-    });
-    await broadcastCacheList();
-    return { ok: true, error: null };
   }
 
   // Синтез одной реплики через Edge нейронный TTS (Стадия 4). Фон делает websocket-запрос
@@ -569,43 +491,47 @@ export default defineBackground(() => {
     return { segments: segments ?? null };
   }
 
-  // --- Управляющие команды Inspector по тому же порту ---
-  async function handleInspectorControl(
+  // --- Управляющие команды страницы кэша по тому же порту ---
+  async function handleCachePortControl(
     port: RuntimePort,
-    message: InspectorControlMessage,
+    message: CachePortControlMessage,
   ): Promise<void> {
     if (message.type === 'request-cache-list') {
-      const reply: InspectorMessage = { type: 'cache-list', items: await listMeta() };
+      const reply: CachePortMessage = { type: 'cache-list', items: await listMeta() };
       port.postMessage(reply);
       return;
     }
     if (message.type === 'request-cache-entry') {
       const entry = await getEntry(message.videoId);
-      const reply: InspectorMessage = { type: 'cache-entry', entry };
+      const reply: CachePortMessage = { type: 'cache-entry', entry };
       port.postMessage(reply);
       return;
     }
     if (message.type === 'clear-cache') {
       await clearAll();
       await broadcastCacheList();
+      return;
+    }
+    if (message.type === 'delete-video-cache') {
+      await removeEntry(message.videoId);
+      await broadcastCacheList();
     }
   }
 
   browser.runtime.onConnect.addListener((port) => {
-    if (port.name !== INSPECTOR_PORT_NAME) {
+    if (port.name !== CACHE_PORT_NAME) {
       return;
     }
-    inspectorPorts.add(port);
+    cachePorts.add(port);
 
-    port.postMessage(buildRuntimeMessage());
     void broadcastCacheList();
 
     port.onMessage.addListener((raw: unknown) => {
-      void handleInspectorControl(port, raw as InspectorControlMessage);
+      void handleCachePortControl(port, raw as CachePortControlMessage);
     });
 
     port.onDisconnect.addListener(() => {
-      inspectorPorts.delete(port);
+      cachePorts.delete(port);
     });
   });
 
@@ -616,15 +542,6 @@ export default defineBackground(() => {
 
   browser.runtime.onMessage.addListener((message: unknown, sender: MessageSender) => {
     const backgroundMessage = message as BackgroundMessage;
-
-    if (backgroundMessage.type === 'set-translation-active') {
-      const tabId = sender.tab?.id;
-      if (tabId !== undefined) {
-        getTabState(tabId).translationActive = backgroundMessage.active;
-        broadcastRuntimeState();
-      }
-      return; // ответ не требуется
-    }
 
     if (backgroundMessage.type === 'cache-lookup') {
       const { videoId, language } = backgroundMessage;
@@ -660,8 +577,19 @@ export default defineBackground(() => {
       return handleApiTranslate(backgroundMessage, sender.tab?.id ?? null);
     }
 
-    if (backgroundMessage.type === 'record-api-cost') {
-      return handleRecordApiCost(backgroundMessage);
+    if (backgroundMessage.type === 'request-video-meta') {
+      return getMeta(backgroundMessage.videoId).then(
+        (meta): VideoMetaResponse => ({ meta }),
+      );
+    }
+
+    if (backgroundMessage.type === 'delete-video-cache') {
+      return removeEntry(backgroundMessage.videoId).then(
+        async (): Promise<DeleteVideoCacheResponse> => {
+          await broadcastCacheList();
+          return { ok: true };
+        },
+      );
     }
 
     if (backgroundMessage.type === 'get-translation') {
@@ -675,12 +603,5 @@ export default defineBackground(() => {
     return undefined;
   });
 
-  // Вкладка закрыта — убираем её рантайм-состояние (иначе утечка + мусор в Inspector).
-  browser.tabs.onRemoved.addListener((tabId: number) => {
-    if (runtimeStates.delete(tabId)) {
-      broadcastRuntimeState();
-    }
-  });
-
-  console.info('[Mnemosyne] background ready (Стадия 3.4: рантайм-состояние per-tab)');
+  console.info('[Mnemosyne] background ready');
 });

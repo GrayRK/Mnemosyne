@@ -13,9 +13,8 @@ export interface CvmSettings {
   autoStart: boolean; // запускать перевод при открытии страницы
   translationVolume: number; // 0..1
   videoDucking: number; // 0..MAX_VIDEO_DUCKING
-  showCost: boolean; // показывать примерную стоимость перевода в виджете
-  ttsMinRate: number; // нижняя граница темпа TTS (множитель), TTS_RATE_MIN..TTS_RATE_MAX
-  ttsMaxRate: number; // верхняя граница темпа TTS (множитель), TTS_RATE_MIN..TTS_RATE_MAX
+  ttsMinRate: number; // нижняя граница темпа TTS (множитель)
+  ttsMaxRate: number; // верхняя граница темпа TTS (множитель)
   ttsEndpoint: string; // адрес прокси-эндпоинта синтеза (Cloudflare Worker или локальный релей)
   ttsOffsetMs: number; // сдвиг ВРЕМЕНИ озвучки/субтитров относительно видео, мс (+раньше / −позже)
   subsPositionPct: number; // вертикальное положение субтитров на экране, 0 (верх) .. 100 (низ)
@@ -24,7 +23,7 @@ export interface CvmSettings {
 // Движок озвучки: 'edge' — нейронный через прокси, 'webspeech' — системные голоса браузера.
 export type TtsEngineName = 'edge' | 'webspeech';
 
-// Статус перевода для индикатора и Inspector.
+// Статус перевода для индикатора виджета.
 export type TranslationStatus = 'ready' | 'translating' | 'error';
 
 // Прогресс перевода через API: сколько батчей завершено из общего числа.
@@ -32,23 +31,6 @@ export interface TranslationProgress {
   done: number;
   total: number;
 }
-
-// Рантайм-состояние (не сохраняется, живёт во время сессии).
-export interface CvmRuntimeState {
-  currentVideoId: string | null;
-  translationStatus: TranslationStatus;
-  translationActive: boolean; // состояние кнопки виджета (вкл/выкл перевод)
-  translationProgress: TranslationProgress | null; // null — перевод не идёт
-}
-
-// Рантайм-состояние конкретной вкладки (per-tab, Стадия 3.4). Фон хранит
-// Map<tabId, CvmRuntimeState>; в Inspector уходит массив таких записей.
-export interface TabRuntimeState extends CvmRuntimeState {
-  tabId: number;
-}
-
-// Полный снимок состояния для Live State Inspector.
-export interface CvmStateSnapshot extends CvmSettings, CvmRuntimeState {}
 
 // Вариант языка перевода для дропдауна popup.
 export interface LanguageOption {
@@ -76,7 +58,8 @@ export interface CaptionSegment {
   text: string;
 }
 
-// Метрики одного перевода через Claude API (для API Monitor, Стадия 3.2).
+// Данные одного перевода через Claude API. Прогресс (complete/completedBatches/batchCount)
+// показывается на странице кэша; usage/тайминги хранятся для будущего расчёта стоимости (этап 2.4).
 export interface ApiTranslationMeta {
   model: string; // id модели, которой переводили
   batchCount: number; // сколько батчей сформировано
@@ -86,35 +69,10 @@ export interface ApiTranslationMeta {
   outputTokens: number; // суммарно usage.output_tokens по всем батчам
   totalMs: number; // wall-clock всего перевода (с учётом параллелизма)
   batchMs: number[]; // длительность каждого батча, мс
-  videoSeconds: number; // длительность субтитровой дорожки, сек (для плотности речи)
-  costUsd: number | null; // зафиксированная стоимость перевода, $ (Стадия 3.3); null — не задана
+  videoSeconds: number; // длительность субтитровой дорожки, сек
   createdAt: number; // когда выполнен замер, epoch мс
-  completedBatches: number; // сколько батчей уже записано (потоковая отдача, Стадия 3.4)
+  completedBatches: number; // сколько батчей уже записано (потоковая отдача)
   complete: boolean; // true — перевод дописан целиком; false — ещё наполняется
-}
-
-// --- Калибровка калькулятора стоимости (Стадия 3.3) ---
-
-// Один замер: реальная стоимость перевода против его объёма/длительности.
-// Хранится отдельно от кэша (mnemosyne_cost_samples), переживает очистку кэша.
-export interface CostSample {
-  dollars: number; // фактически потрачено на перевод, $
-  chars: number; // символов оригинала (база расчёта)
-  tokensIn: number; // суммарно входных токенов
-  tokensOut: number; // суммарно выходных токенов
-  videoSeconds: number; // длительность видео/дорожки, сек
-  model: string; // модель, которой переводили (выборки фильтруются по ней)
-  videoId: string;
-  language: string;
-  at: number; // когда зафиксировано, epoch мс
-}
-
-// Усреднённые коэффициенты калькулятора по выборкам текущей модели.
-export interface CalibrationStats {
-  sampleCount: number; // сколько выборок учтено
-  dollarsPerChar: number; // R — средняя стоимость символа, $
-  charsPerMinute: number; // D — средняя плотность речи, символов/мин
-  tokensPerChar: number; // для оценки токенов в калькуляторе
 }
 
 // Полная запись кэша (одна на видео, хранится под ключом mnemosyne_cap_{videoId}).
@@ -136,7 +94,7 @@ export interface CvmCacheEntry {
   apiMeta: Record<string, ApiTranslationMeta>;
 }
 
-// Метаданные записи для списка в Inspector (без тяжёлых сегментов).
+// Метаданные записи для списка кэша (без тяжёлых сегментов).
 export interface CvmCacheMeta {
   videoId: string;
   title: string;

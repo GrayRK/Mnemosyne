@@ -1,5 +1,4 @@
 import type {
-  TabRuntimeState,
   CvmCacheEntry,
   CvmCacheMeta,
   CaptionSegment,
@@ -8,16 +7,10 @@ import type {
 } from '@/lib/types';
 
 // =====================================================================
-// Inspector  <--  background   (long-lived port)
+// Страница кэша  <--  background   (long-lived port)
 // =====================================================================
 
-// Рантайм-состояние всех вкладок (per-tab, Стадия 3.4).
-export interface RuntimeStateMessage {
-  type: 'runtime-state';
-  tabs: TabRuntimeState[];
-}
-
-// Список метаданных кэша для меню Inspector.
+// Список метаданных кэша для страницы «История».
 export interface CacheListMessage {
   type: 'cache-list';
   items: CvmCacheMeta[];
@@ -29,10 +22,10 @@ export interface CacheEntryMessage {
   entry: CvmCacheEntry | null;
 }
 
-export type InspectorMessage = RuntimeStateMessage | CacheListMessage | CacheEntryMessage;
+export type CachePortMessage = CacheListMessage | CacheEntryMessage;
 
 // =====================================================================
-// Inspector  -->  background   (тот же порт, управляющие команды)
+// Страница кэша  -->  background   (тот же порт, управляющие команды)
 // =====================================================================
 
 export interface RequestCacheListMessage {
@@ -48,10 +41,11 @@ export interface ClearCacheMessage {
   type: 'clear-cache';
 }
 
-export type InspectorControlMessage =
+export type CachePortControlMessage =
   | RequestCacheListMessage
   | RequestCacheEntryMessage
-  | ClearCacheMessage;
+  | ClearCacheMessage
+  | DeleteVideoCacheMessage;
 
 // =====================================================================
 // content (ISOLATED)  -->  background   (runtime.sendMessage)
@@ -108,18 +102,27 @@ export interface ApiTranslateResponse {
   error: string | null; // напр. 'no-api-key', текст ошибки сети/формата
 }
 
-// Зафиксировать реальную стоимость перевода ($) — из API Monitor.
-// Фон сам берёт объём/токены/длительность из apiMeta и добавляет калибровочный замер.
-export interface RecordApiCostMessage {
-  type: 'record-api-cost';
+// Метаданные кэша по видео для карточки «Текущее видео» в popup. meta = null — видео
+// ещё не обработано (нет ни оригинала, ни перевода в кэше).
+export interface RequestVideoMetaMessage {
+  type: 'request-video-meta';
   videoId: string;
-  language: string;
-  costUsd: number;
 }
 
-export interface RecordApiCostResponse {
+export interface VideoMetaResponse {
+  meta: CvmCacheMeta | null;
+}
+
+
+// Удалить кэш одного видео (переводы + оригинал). Запрос из popup и страницы кэша.
+// После удаления фон рассылает обновлённый cache-list всем открытым страницам.
+export interface DeleteVideoCacheMessage {
+  type: 'delete-video-cache';
+  videoId: string;
+}
+
+export interface DeleteVideoCacheResponse {
   ok: boolean;
-  error: string | null; // напр. 'no-meta', 'already-fixed'
 }
 
 // Источник озвучиваемого перевода: Claude API или автоперевод YouTube.
@@ -159,7 +162,8 @@ export type BackgroundMessage =
   | CacheLookupMessage
   | CacheStoreMessage
   | ApiTranslateMessage
-  | RecordApiCostMessage
+  | RequestVideoMetaMessage
+  | DeleteVideoCacheMessage
   | GetTranslationMessage
   | TtsSynthMessage;
 
