@@ -180,6 +180,41 @@
         border-color: var(--m-accent);
         background: var(--m-accent-soft);
       }
+      /* Кнопки добычи медиа через хэлпер (этап 5.2). */
+      .ci-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 2px;
+      }
+      .ci-dl {
+        font-size: 11px;
+        line-height: 1;
+        color: var(--m-text);
+        background: var(--m-surface-2);
+        border: 1px solid var(--m-border);
+        border-radius: var(--m-radius-pill);
+        padding: 6px 10px;
+        cursor: pointer;
+        font-family: inherit;
+        font-variant-numeric: tabular-nums;
+        transition: color 0.15s ease, border-color 0.15s ease;
+      }
+      .ci-dl:hover:not(:disabled) {
+        border-color: var(--m-accent);
+      }
+      .ci-dl:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+      .ci-dl.busy {
+        color: var(--m-brand-2);
+        border-color: var(--m-accent);
+      }
+      .ci-dl.err {
+        color: var(--m-danger-hover);
+        border-color: var(--m-danger);
+      }
       /* Правый столбец: ссылка-открыть + каретка раскрытия. */
       .ci-aside {
         flex: 0 0 auto;

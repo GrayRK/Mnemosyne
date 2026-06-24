@@ -65,6 +65,26 @@ export const CACHE_RECONNECT_DELAY_MS = 1000; // переподключение 
 // --- Имя страницы «История» (кэш текстов, entrypoint cache/) ---
 export const CACHE_PAGE = 'cache.html';
 
+// --- Нативный хэлпер (десктоп-компаньон, Стадия 5) ---
+// Тонкое расширение работает и без хэлпера (лайт-режим). Установленный хэлпер
+// разблокирует тяжёлые опции (добыча медиа, локальные LLM — этапы 5.2/5.3).
+// Связь: native messaging (рукопожатие/выдача порт+токен) → локальный HTTP на 127.0.0.1.
+export const HELPER_NM_HOST = 'com.mnemosyne.helper'; // имя native-messaging-хоста (совпадает с реестром)
+export const HELPER_PROTOCOL_VERSION = '0.0.1'; // версия протокола рукопожатия со стороны расширения
+export const HELPER_HANDSHAKE_TIMEOUT_MS = 4000; // потолок ожидания ответа хоста
+export const HELPER_HEALTH_TIMEOUT_MS = 2000; // потолок проверки /health локального сервера
+export const HELPER_HEALTH_PATH = 'health'; // путь health-эндпоинта сервера
+
+// --- Добыча медиа через хэлпер (этап 5.2), кнопки на странице «История» ---
+export const MEDIA_DL_AUDIO_LABEL = 'Скачать аудио';
+export const MEDIA_DL_VIDEO_LABEL = 'Скачать видео';
+export const MEDIA_DL_HELPER_REQUIRED = 'Требуется нативный хэлпер (десктоп-компаньон)';
+export const MEDIA_DL_ERROR_LABEL = 'Ошибка';
+// Путь выбирается мгновенно (File System Access), затем добыча идёт в фоне с % на кнопке.
+export const MEDIA_DL_PREPARING_LABEL = 'старт…'; // задача создана, прогресс ещё 0
+export const MEDIA_DL_SAVING_LABEL = 'сохранение…'; // добыто, пишем файл по выбранному пути
+export const MEDIA_POLL_INTERVAL_MS = 600; // период опроса прогресса задачи
+
 // --- Языки перевода (короткий список, легко расширяется) ---
 export const SUPPORTED_LANGUAGES: LanguageOption[] = [
   { code: 'ru', label: 'Русский' },

@@ -398,6 +398,36 @@
         background: var(--m-danger-hover);
         border-color: var(--m-danger-hover);
       }
+
+      /* --- Статус нативного хэлпера (Стадия 5) --- */
+      .helper-status {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+      }
+      .helper-dot {
+        flex: none;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--m-text-faint); /* по умолчанию: не установлен / неизвестно */
+      }
+      .helper-dot.is-connected {
+        background: var(--m-ok);
+      }
+      .helper-dot.is-error {
+        background: var(--m-danger);
+      }
+      #helper-status-text {
+        color: var(--m-text);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      #helper-recheck {
+        flex: none;
+      }
     </style>
   </head>
   <body>
@@ -554,6 +584,24 @@
         <div class="field" style="margin-top: var(--m-space-3); margin-bottom: 0">
           <label for="subs-font" data-i18n="subsFont">Шрифт</label>
           <select id="subs-font"></select>
+        </div>
+      </div>
+
+      <!-- Нативный хэлпер (десктоп-компаньон, Стадия 5). Расширение работает и без него
+           (лайт-режим); установленный хэлпер разблокирует тяжёлые опции. -->
+      <div class="card" id="helper-card">
+        <div class="section-label" data-i18n="helperSection">Нативный хэлпер</div>
+        <div class="row">
+          <div class="helper-status">
+            <span id="helper-dot" class="helper-dot"></span>
+            <span id="helper-status-text">…</span>
+          </div>
+          <button id="helper-recheck" class="btn-secondary" type="button" data-i18n="helperRecheck">
+            Проверить
+          </button>
+        </div>
+        <div class="hint" id="helper-hint" data-i18n="helperHint">
+          Расширение работает и без хэлпера. Установленный компаньон разблокирует добычу медиа и локальные модели.
         </div>
       </div>
     </section>

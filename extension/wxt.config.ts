@@ -22,10 +22,17 @@ export default defineConfig({
   manifest: {
     name: 'Mnemosyne',
     description: 'Mnemosyne — перевод и нейронная озвучка видео-субтитров на любом языке.',
+    // key — публичный ключ, фиксирующий ID dev/unpacked-сборки
+    // (ID = fgdljagjbgmkjebhadodlahahapnbalp). Нужен, чтобы ID был детерминированным и
+    // попадал в allow-list нативного хэлпера и в allowed_origins его native-messaging
+    // манифеста (Стадия 5.1). Приватный ключ — в helper/.dev-keys (НЕ в репозитории).
+    key: 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuJmrecXUyp3sVSJzeUzxAT1uWq7fvjo/I3E1TWFIMvbGezA/WHlUq+HRd14LyLUUS6ua0uNHSGTv8IweHoPPCLUQ/QZfcfJjbhY4SkbLolO318SAEvhCPqM/2QCrY77n+xEmMXfySa7tC99l/s+JEKFj7wqF0bDQ7rAf06lkvThs64bLPwEM8qXFiwxR1ulGnRrmTUJAwmrDP9AEYu/l3cTAE3QLsSzPW/+d9zoj/a6yMaYdKFtCpNNV1FtvjhSnFLEDlfuofWjAY7uxG31DtKtGixmvVbpp7ieHZaku1i+N9hKLVzFtTd4APgOy1mPxf6Sle8gAamOQPOqR9hXmmwIDAQAB',
     // activeTab — чтобы popup мог прочитать URL/заголовок активной вкладки (карточка
     // «Текущее видео»): определить videoId и превью. Доступ выдаётся при клике по иконке
     // расширения, без широкого предупреждения «читать историю».
-    permissions: ['storage', 'activeTab'],
+    // nativeMessaging — связь с нативным хэлпером (Стадия 5): connectNative к хосту.
+    // Сохранение медиа идёт через File System Access (showSaveFilePicker) — без доп. разрешений.
+    permissions: ['storage', 'activeTab', 'nativeMessaging'],
     // Доступ из service worker: API перевода (aiprimetech.io) + прокси Edge TTS (Стадия 4):
     // Cloudflare Worker (*.workers.dev) и/или локальный релей (127.0.0.1). Порт в match-паттерн
     // не входит — покрывает любой. Для своего домена Worker'а добавь сюда его хост.

@@ -5,6 +5,7 @@ import type {
   CaptionKind,
   TranslationStatus,
 } from '@/lib/types';
+import type { HelperStatus, HelperMediaKind, MediaJobStatus } from '@/lib/helper';
 
 // =====================================================================
 // Страница кэша  <--  background   (long-lived port)
@@ -157,6 +158,41 @@ export interface TtsSynthResponse {
   error: string | null;
 }
 
+// Опрос состояния нативного хэлпера (Стадия 5) для индикатора в popup.
+// Рукопожатие идёт из background (там же будущие тяжёлые вызовы хэлпера).
+export interface HelperStatusMessage {
+  type: 'helper-status';
+}
+
+export type HelperStatusResponse = HelperStatus;
+
+// Добыча медиа через нативный хэлпер (этап 5.2). Страница «История» сама показывает
+// диалог пути (File System Access) и стримит готовый файл, поэтому background лишь
+// запускает задачу (отдаёт jobId + URL файла) и отдаёт статус для % на кнопке.
+export interface MediaStartMessage {
+  type: 'media-start';
+  videoId: string;
+  kind: HelperMediaKind; // 'audio' | 'video'
+}
+
+export interface MediaStartResponse {
+  ok: boolean;
+  jobId: string | null;
+  fileUrl: string | null; // URL готового файла с токеном (страница стримит его в выбранный путь)
+  error: string | null;
+}
+
+export interface MediaStatusMessage {
+  type: 'media-status';
+  jobId: string;
+}
+
+export interface MediaStatusResponse {
+  ok: boolean;
+  status: MediaJobStatus | null;
+  error: string | null;
+}
+
 export type BackgroundMessage =
   | SetTranslationActiveMessage
   | CacheLookupMessage
@@ -165,7 +201,10 @@ export type BackgroundMessage =
   | RequestVideoMetaMessage
   | DeleteVideoCacheMessage
   | GetTranslationMessage
-  | TtsSynthMessage;
+  | TtsSynthMessage
+  | HelperStatusMessage
+  | MediaStartMessage
+  | MediaStatusMessage;
 
 // =====================================================================
 // background  -->  content (tab)   (browser.tabs.sendMessage)

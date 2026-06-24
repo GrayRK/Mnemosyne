@@ -36,6 +36,8 @@ import type {
   VideoMetaResponse,
   DeleteVideoCacheMessage,
   DeleteVideoCacheResponse,
+  HelperStatusMessage,
+  HelperStatusResponse,
 } from '@/lib/messaging';
 import { buildThemeCss } from '@/lib/theme';
 import { t, UI_LANGUAGES, DEFAULT_UI_LANGUAGE } from '@/lib/i18n';
@@ -73,6 +75,13 @@ const langButtonEl = requireEl<HTMLButtonElement>('lang-button');
 const langDropdownEl = requireEl<HTMLElement>('lang-dropdown');
 const trBatchingEl = requireEl<HTMLInputElement>('tr-batching');
 const trPromptEl = requireEl<HTMLTextAreaElement>('tr-prompt');
+
+// Статус нативного хэлпера (Стадия 5).
+const helperDotEl = requireEl<HTMLElement>('helper-dot');
+const helperStatusTextEl = requireEl<HTMLElement>('helper-status-text');
+const helperRecheckEl = requireEl<HTMLButtonElement>('helper-recheck');
+// Последний полученный статус — чтобы перерисовать его при смене языка интерфейса.
+let lastHelperStatus: HelperStatusResponse | null = null;
 
 // Текущий язык интерфейса (живо переключается, см. setUiLanguage).
 let uiLang: string = DEFAULT_UI_LANGUAGE;
@@ -226,6 +235,11 @@ async function setUiLanguage(lang: string): Promise<void> {
   const engine = ttsEngineEl.value;
   populateEngines();
   ttsEngineEl.value = engine;
+
+  // Динамический текст статуса хэлпера не помечен data-i18n — перерисуем вручную.
+  if (lastHelperStatus !== null) {
+    renderHelperStatus(lastHelperStatus);
+  }
 
   await loadVideoInfo();
 }
@@ -525,6 +539,38 @@ async function loadSubtitleSettings(): Promise<void> {
   updateSubsPositionLabel();
 }
 
+// --- Нативный хэлпер (Стадия 5): индикатор статуса ---
+
+// Отрисовать состояние связки: цвет точки + локализованный текст (+ версия при подключении).
+function renderHelperStatus(status: HelperStatusResponse): void {
+  lastHelperStatus = status;
+  helperDotEl.classList.toggle('is-connected', status.state === 'connected');
+  helperDotEl.classList.toggle('is-error', status.state === 'error');
+  if (status.state === 'connected') {
+    const version = status.version !== null ? ` · v${status.version}` : '';
+    helperStatusTextEl.textContent = `${t(uiLang, 'helperConnected')}${version}`;
+  } else if (status.state === 'error') {
+    helperStatusTextEl.textContent = t(uiLang, 'helperError');
+  } else {
+    helperStatusTextEl.textContent = t(uiLang, 'helperNotInstalled');
+  }
+}
+
+// Опросить хэлпер через background и отрисовать результат. Лайт-режим: отсутствие
+// хэлпера — штатное состояние «не установлен», без ошибок в UI.
+async function refreshHelperStatus(): Promise<void> {
+  helperDotEl.classList.remove('is-connected', 'is-error');
+  helperStatusTextEl.textContent = t(uiLang, 'helperChecking');
+  helperRecheckEl.disabled = true;
+  try {
+    const message: HelperStatusMessage = { type: 'helper-status' };
+    const response = (await browser.runtime.sendMessage(message)) as HelperStatusResponse | undefined;
+    renderHelperStatus(response ?? { state: 'error', version: null, error: 'no response' });
+  } finally {
+    helperRecheckEl.disabled = false;
+  }
+}
+
 // --- Загрузка текущих значений настроек в UI ---
 async function loadValues(): Promise<void> {
   const [
@@ -750,6 +796,11 @@ function registerHandlers(): void {
   speechSynthesis.addEventListener('voiceschanged', () => {
     void populateVoices();
   });
+
+  // Повторная проверка связи с нативным хэлпером.
+  helperRecheckEl.addEventListener('click', () => {
+    void refreshHelperStatus();
+  });
 }
 
 async function init(): Promise<void> {
@@ -765,6 +816,7 @@ async function init(): Promise<void> {
   await populateVoices();
   registerHandlers();
   await loadVideoInfo();
+  void refreshHelperStatus(); // не блокируем готовность popup ожиданием хэлпера
   console.info('[Mnemosyne] popup ready');
 }
 

@@ -52,7 +52,13 @@ import type {
   TtsSynthMessage,
   TtsSynthResponse,
   TabMessage,
+  HelperStatusResponse,
+  MediaStartMessage,
+  MediaStartResponse,
+  MediaStatusMessage,
+  MediaStatusResponse,
 } from '@/lib/messaging';
+import { checkHelper, startMedia, mediaStatus, mediaFileUrl } from '@/lib/helper';
 
 // Тип порта выводим из слушателя, чтобы не зависеть от имён неймспейсов WXT.
 type RuntimePort = Parameters<Parameters<typeof browser.runtime.onConnect.addListener>[0]>[0];
@@ -477,6 +483,31 @@ export default defineBackground(() => {
     }
   }
 
+  // --- Добыча медиа через нативный хэлпер (этап 5.2) ---
+  // Страница «История» уже выбрала путь (File System Access) и сама стримит файл. Здесь
+  // только запускаем задачу (yt-dlp идёт в фоне хэлпера) и отдаём jobId + URL файла.
+  async function handleMediaStart(message: MediaStartMessage): Promise<MediaStartResponse> {
+    try {
+      const jobId = await startMedia(message.videoId, message.kind);
+      const fileUrl = mediaFileUrl(jobId);
+      if (fileUrl === null) {
+        return { ok: false, jobId: null, fileUrl: null, error: 'no helper connection' };
+      }
+      return { ok: true, jobId, fileUrl, error: null };
+    } catch (error: unknown) {
+      return { ok: false, jobId: null, fileUrl: null, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  async function handleMediaStatus(message: MediaStatusMessage): Promise<MediaStatusResponse> {
+    try {
+      const status = await mediaStatus(message.jobId);
+      return { ok: true, status, error: null };
+    } catch (error: unknown) {
+      return { ok: false, status: null, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
   // Отдать content финальные переведённые сегменты для озвучки (Стадия 4).
   async function handleGetTranslation(
     message: GetTranslationMessage,
@@ -598,6 +629,18 @@ export default defineBackground(() => {
 
     if (backgroundMessage.type === 'tts-synth') {
       return handleTtsSynth(backgroundMessage);
+    }
+
+    if (backgroundMessage.type === 'helper-status') {
+      return checkHelper() as Promise<HelperStatusResponse>;
+    }
+
+    if (backgroundMessage.type === 'media-start') {
+      return handleMediaStart(backgroundMessage);
+    }
+
+    if (backgroundMessage.type === 'media-status') {
+      return handleMediaStatus(backgroundMessage);
     }
 
     return undefined;

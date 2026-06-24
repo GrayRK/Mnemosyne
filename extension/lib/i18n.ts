@@ -71,6 +71,13 @@ export interface Messages {
   noSystemVoices: string;
   uiLanguageTitle: string;
   historyTitle: string;
+  helperSection: string;
+  helperRecheck: string;
+  helperHint: string;
+  helperChecking: string;
+  helperConnected: string;
+  helperNotInstalled: string;
+  helperError: string;
 }
 
 export type MessageKey = keyof Messages;
@@ -130,6 +137,13 @@ export const TRANSLATIONS: Record<UiLangCode, Messages> = {
     noSystemVoices: 'Голоса для языка не найдены',
     uiLanguageTitle: 'Язык интерфейса',
     historyTitle: 'История',
+    helperSection: 'Нативный хэлпер',
+    helperRecheck: 'Проверить',
+    helperHint: 'Расширение работает и без хэлпера. Установленный компаньон разблокирует добычу медиа и локальные модели.',
+    helperChecking: 'Проверка…',
+    helperConnected: 'Подключён',
+    helperNotInstalled: 'Не установлен',
+    helperError: 'Ошибка связи',
   },
   en: {
     tabMain: 'Main',
@@ -185,6 +199,13 @@ export const TRANSLATIONS: Record<UiLangCode, Messages> = {
     noSystemVoices: 'No voices found for this language',
     uiLanguageTitle: 'Interface language',
     historyTitle: 'History',
+    helperSection: 'Native helper',
+    helperRecheck: 'Check',
+    helperHint: 'The extension works without the helper. The installed companion unlocks media extraction and local models.',
+    helperChecking: 'Checking…',
+    helperConnected: 'Connected',
+    helperNotInstalled: 'Not installed',
+    helperError: 'Connection error',
   },
   es: {
     tabMain: 'Inicio',
@@ -240,6 +261,13 @@ export const TRANSLATIONS: Record<UiLangCode, Messages> = {
     noSystemVoices: 'No se encontraron voces para este idioma',
     uiLanguageTitle: 'Idioma de la interfaz',
     historyTitle: 'Historial',
+    helperSection: 'Asistente nativo',
+    helperRecheck: 'Comprobar',
+    helperHint: 'La extensión funciona sin el asistente. El complemento instalado habilita la extracción de medios y los modelos locales.',
+    helperChecking: 'Comprobando…',
+    helperConnected: 'Conectado',
+    helperNotInstalled: 'No instalado',
+    helperError: 'Error de conexión',
   },
   de: {
     tabMain: 'Start',
@@ -295,6 +323,13 @@ export const TRANSLATIONS: Record<UiLangCode, Messages> = {
     noSystemVoices: 'Keine Stimmen für diese Sprache gefunden',
     uiLanguageTitle: 'Sprache der Oberfläche',
     historyTitle: 'Verlauf',
+    helperSection: 'Nativer Helfer',
+    helperRecheck: 'Prüfen',
+    helperHint: 'Die Erweiterung funktioniert auch ohne Helfer. Der installierte Begleiter schaltet Medienextraktion und lokale Modelle frei.',
+    helperChecking: 'Prüfe…',
+    helperConnected: 'Verbunden',
+    helperNotInstalled: 'Nicht installiert',
+    helperError: 'Verbindungsfehler',
   },
   fr: {
     tabMain: 'Accueil',
@@ -350,6 +385,13 @@ export const TRANSLATIONS: Record<UiLangCode, Messages> = {
     noSystemVoices: 'Aucune voix trouvée pour cette langue',
     uiLanguageTitle: "Langue de l'interface",
     historyTitle: 'Historique',
+    helperSection: 'Assistant natif',
+    helperRecheck: 'Vérifier',
+    helperHint: "L'extension fonctionne sans l'assistant. Le compagnon installé débloque l'extraction des médias et les modèles locaux.",
+    helperChecking: 'Vérification…',
+    helperConnected: 'Connecté',
+    helperNotInstalled: 'Non installé',
+    helperError: 'Erreur de connexion',
   },
   zh: {
     tabMain: '主页',
@@ -405,6 +447,13 @@ export const TRANSLATIONS: Record<UiLangCode, Messages> = {
     noSystemVoices: '未找到该语言的语音',
     uiLanguageTitle: '界面语言',
     historyTitle: '历史记录',
+    helperSection: '本地助手',
+    helperRecheck: '检查',
+    helperHint: '扩展无需助手即可运行。安装的伴随程序可解锁媒体提取和本地模型。',
+    helperChecking: '检查中…',
+    helperConnected: '已连接',
+    helperNotInstalled: '未安装',
+    helperError: '连接错误',
   },
   ja: {
     tabMain: 'ホーム',
@@ -460,6 +509,13 @@ export const TRANSLATIONS: Record<UiLangCode, Messages> = {
     noSystemVoices: 'この言語の音声が見つかりません',
     uiLanguageTitle: 'インターフェースの言語',
     historyTitle: '履歴',
+    helperSection: 'ネイティブヘルパー',
+    helperRecheck: '確認',
+    helperHint: '拡張機能はヘルパーなしでも動作します。インストールしたコンパニオンがメディア抽出とローカルモデルを有効にします。',
+    helperChecking: '確認中…',
+    helperConnected: '接続済み',
+    helperNotInstalled: '未インストール',
+    helperError: '接続エラー',
   },
 };
 

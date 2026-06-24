@@ -11,13 +11,27 @@ import {
   CACHE_BANNER_EMPTY_PLACEHOLDER,
   CACHE_DELETE_VIDEO_CONFIRM,
   CACHE_DELETE_VIDEO_LABEL,
+  MEDIA_DL_AUDIO_LABEL,
+  MEDIA_DL_VIDEO_LABEL,
+  MEDIA_DL_HELPER_REQUIRED,
+  MEDIA_DL_ERROR_LABEL,
+  MEDIA_DL_PREPARING_LABEL,
+  MEDIA_DL_SAVING_LABEL,
+  MEDIA_POLL_INTERVAL_MS,
   youtubeThumbnailUrl,
 } from '@/lib/constants';
 import type { CvmCacheMeta, CvmCacheEntry, CaptionSegment } from '@/lib/types';
+import type { HelperMediaKind } from '@/lib/helper';
 import type {
   CachePortMessage,
   CachePortControlMessage,
   DeleteVideoCacheMessage,
+  HelperStatusMessage,
+  HelperStatusResponse,
+  MediaStartMessage,
+  MediaStartResponse,
+  MediaStatusMessage,
+  MediaStatusResponse,
 } from '@/lib/messaging';
 import { buildThemeCss } from '@/lib/theme';
 
@@ -204,6 +218,192 @@ function createTrashIcon(): SVGSVGElement {
   return svg;
 }
 
+// =====================================================================
+// Добыча медиа через нативный хэлпер (этап 5.2): кнопки на карточках
+// =====================================================================
+
+// Доступность хэлпера (опрашивается при загрузке). Без него кнопки заблокированы —
+// расширение остаётся в лайт-режиме.
+let helperAvailable = false;
+// Кнопки, по которым уже открывается диалог сохранения — чтобы не дёргать дважды.
+const dlBusy = new Set<string>();
+
+function dlKey(videoId: string, kind: HelperMediaKind): string {
+  return `${videoId}:${kind}`;
+}
+
+function baseDlLabel(kind: HelperMediaKind): string {
+  return kind === 'audio' ? MEDIA_DL_AUDIO_LABEL : MEDIA_DL_VIDEO_LABEL;
+}
+
+async function sendBg<R>(
+  message: HelperStatusMessage | MediaStartMessage | MediaStatusMessage,
+): Promise<R> {
+  return (await browser.runtime.sendMessage(message)) as R;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Убрать недопустимые в имени файла символы.
+function sanitizeFilename(name: string): string {
+  return name.replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim().slice(0, 150) || 'video';
+}
+
+// File System Access: showSaveFilePicker может отсутствовать в типах lib.dom — берём
+// через узкий каст, не переопределяя глобальные типы.
+type SaveFilePicker = (options?: {
+  suggestedName?: string;
+  types?: { description?: string; accept: Record<string, string[]> }[];
+}) => Promise<FileSystemFileHandle>;
+
+// Показать диалог сохранения сразу (без сети) и вернуть дескриптор файла.
+async function pickSaveFile(
+  title: string,
+  videoId: string,
+  kind: HelperMediaKind,
+): Promise<FileSystemFileHandle> {
+  const picker = (window as unknown as { showSaveFilePicker?: SaveFilePicker }).showSaveFilePicker;
+  if (picker === undefined) {
+    throw new Error('File System Access не поддерживается этим браузером');
+  }
+  const ext = kind === 'audio' ? 'mp3' : 'mp4';
+  const mime = kind === 'audio' ? 'audio/mpeg' : 'video/mp4';
+  const description = kind === 'audio' ? 'Аудио' : 'Видео';
+  const suggestedName = `${sanitizeFilename(title !== '' ? title : videoId)}.${ext}`;
+  return picker({ suggestedName, types: [{ description, accept: { [mime]: [`.${ext}`] } }] });
+}
+
+function setDlButton(btn: HTMLButtonElement, kind: HelperMediaKind, suffix: string, busy: boolean): void {
+  btn.classList.toggle('busy', busy);
+  btn.classList.remove('err');
+  btn.disabled = busy;
+  btn.textContent = suffix === '' ? baseDlLabel(kind) : `${baseDlLabel(kind)} · ${suffix}`;
+}
+
+// Привести кнопку к базовому виду (с учётом доступности хэлпера).
+function applyDlButton(btn: HTMLButtonElement, kind: HelperMediaKind): void {
+  btn.classList.remove('busy', 'err');
+  btn.textContent = baseDlLabel(kind);
+  if (!helperAvailable) {
+    btn.disabled = true;
+    btn.title = MEDIA_DL_HELPER_REQUIRED;
+  } else {
+    btn.disabled = false;
+    btn.title = '';
+  }
+}
+
+function createDownloadButton(meta: CvmCacheMeta, kind: HelperMediaKind): HTMLButtonElement {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'ci-dl';
+  btn.dataset.video = meta.videoId;
+  btn.dataset.kind = kind;
+  applyDlButton(btn, kind);
+  btn.addEventListener('click', (event: MouseEvent) => {
+    event.stopPropagation(); // не раскрывать карточку
+    void startDownload(meta.videoId, meta.title, kind, btn);
+  });
+  return btn;
+}
+
+// 1) выбор пути мгновенно → 2) старт задачи → 3) % на кнопке → 4) стрим в выбранный файл.
+async function startDownload(
+  videoId: string,
+  title: string,
+  kind: HelperMediaKind,
+  btn: HTMLButtonElement,
+): Promise<void> {
+  const key = dlKey(videoId, kind);
+  if (dlBusy.has(key)) {
+    return;
+  }
+
+  // 1) Диалог пути — сразу, до любой сетевой работы.
+  let handle: FileSystemFileHandle;
+  try {
+    handle = await pickSaveFile(title, videoId, kind);
+  } catch (error: unknown) {
+    if (!(error instanceof DOMException && error.name === 'AbortError')) {
+      console.warn('[Mnemosyne cache] выбор файла', error);
+    }
+    return; // отмена выбора — тихо выходим
+  }
+
+  dlBusy.add(key);
+  setDlButton(btn, kind, MEDIA_DL_PREPARING_LABEL, true);
+  try {
+    // 2) Старт задачи добычи.
+    const started = await sendBg<MediaStartResponse>({ type: 'media-start', videoId, kind });
+    if (!started.ok || started.jobId === null || started.fileUrl === null) {
+      throw new Error(started.error ?? 'media-start failed');
+    }
+
+    // 3) Опрос прогресса → % на кнопке.
+    for (;;) {
+      await delay(MEDIA_POLL_INTERVAL_MS);
+      const polled = await sendBg<MediaStatusResponse>({ type: 'media-status', jobId: started.jobId });
+      if (!polled.ok || polled.status === null) {
+        throw new Error(polled.error ?? 'media-status failed');
+      }
+      if (polled.status.state === 'done') {
+        break;
+      }
+      if (polled.status.state === 'error') {
+        throw new Error(polled.status.error ?? 'extraction error');
+      }
+      setDlButton(btn, kind, `${Math.round(polled.status.progress)}%`, true);
+    }
+
+    // 4) Стрим готового файла в выбранный путь.
+    setDlButton(btn, kind, MEDIA_DL_SAVING_LABEL, true);
+    const response = await fetch(started.fileUrl);
+    if (!response.ok || response.body === null) {
+      throw new Error(`file: HTTP ${response.status}`);
+    }
+    const writable = await handle.createWritable();
+    const reader = response.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      if (value !== undefined) {
+        await writable.write(value);
+      }
+    }
+    await writable.close();
+    applyDlButton(btn, kind);
+  } catch (error: unknown) {
+    btn.classList.remove('busy');
+    btn.classList.add('err');
+    btn.disabled = false;
+    btn.textContent = `${baseDlLabel(kind)} · ${MEDIA_DL_ERROR_LABEL}`;
+    console.warn('[Mnemosyne cache] добыча медиа', error);
+    setTimeout(() => applyDlButton(btn, kind), 4000);
+  } finally {
+    dlBusy.delete(key);
+  }
+}
+
+// Опросить доступность хэлпера и обновить все кнопки.
+async function refreshHelperAvailability(): Promise<void> {
+  try {
+    const status = await sendBg<HelperStatusResponse>({ type: 'helper-status' });
+    helperAvailable = status.state === 'connected';
+  } catch {
+    helperAvailable = false;
+  }
+  for (const btn of cacheListEl.querySelectorAll<HTMLButtonElement>('.ci-dl')) {
+    const kind = btn.dataset.kind as HelperMediaKind | undefined;
+    if (kind !== undefined) {
+      applyDlButton(btn, kind);
+    }
+  }
+}
+
 function createCacheItem(meta: CvmCacheMeta): HTMLElement {
   const key = meta.videoId;
   const item = document.createElement('div');
@@ -262,6 +462,12 @@ function createCacheItem(meta: CvmCacheMeta): HTMLElement {
     }
     main.append(langs);
   }
+
+  // Кнопки добычи аудио/видео через хэлпер (этап 5.2).
+  const actions = document.createElement('div');
+  actions.className = 'ci-actions';
+  actions.append(createDownloadButton(meta, 'audio'), createDownloadButton(meta, 'video'));
+  main.append(actions);
 
   // Правый столбец (по центру): кнопка «смотреть видео» + удалить переводы.
   const aside = document.createElement('div');
@@ -418,6 +624,7 @@ function init(): void {
   cacheSortEl.addEventListener('click', toggleSort);
 
   connect();
+  void refreshHelperAvailability(); // включит кнопки добычи, если хэлпер на связи
   console.info('[Mnemosyne] cache ready');
 }
 

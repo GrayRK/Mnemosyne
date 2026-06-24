@@ -38,6 +38,16 @@ pnpm-debug.log*
 Thumbs.db
 desktop.ini
 
+# Нативный хэлпер (Go): приватные dev-ключи и собранные бинари
+helper/.dev-keys/
+helper/bin/
+helper/dist/
+# Бандл сторонних инструментов (yt-dlp, ffmpeg) — тянутся скриптом упаковки, не в git
+helper/tools/
+
+# Собранные инсталляторы
+installer/dist/
+
 # Локальные настройки Claude Code (персональные, не для общего репозитория)
 .claude/settings.local.json
 reference/
